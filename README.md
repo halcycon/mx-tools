@@ -77,7 +77,7 @@ full:example.com
 
 ```
 worker/          Cloudflare Worker API + check engine (TypeScript)
-web/             React + Vite SuperTool UI
+web/             React + Vite D.A.R.T. UI
 cli/             Go Bubble Tea TUI + local check engine
 dist/            Built static assets (gitignored)
 ```

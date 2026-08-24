@@ -72,7 +72,7 @@ func main() {
 }
 
 func printHelp() {
-	fmt.Println(`mx-tools CLI — private SuperTool
+	fmt.Println(`mx-tools CLI — private D.A.R.T.
 
 Usage:
   mx                  Interactive TUI

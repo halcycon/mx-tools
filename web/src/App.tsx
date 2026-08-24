@@ -208,8 +208,8 @@ export default function App() {
 				</h1>
 			</div>
 			<p className="tagline">
-				Private SuperTool for DNS, mail auth, blacklists, and network lookups — same checks in the web UI and
-				CLI.
+				D.A.R.T. (Domain Authentication & Reputation Toolkit) for DNS, mail auth, blacklists, and network
+				lookups — same checks in the web UI and CLI.
 			</p>
 
 			<form className="search" onSubmit={onSubmit}>

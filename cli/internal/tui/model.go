@@ -150,7 +150,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("mx-tools"))
-	b.WriteString(mutedStyle.Render("  private SuperTool  ·  ↑/↓ scroll  ·  enter run  ·  esc/ctrl+c quit\n\n"))
+	b.WriteString(mutedStyle.Render("  private D.A.R.T.  ·  ↑/↓ scroll  ·  enter run  ·  esc/ctrl+c quit\n\n"))
 	b.WriteString(m.input.View())
 	b.WriteString("\n")
 	if m.loading {
