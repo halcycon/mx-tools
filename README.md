@@ -46,6 +46,33 @@ This project deploys the React app as **static assets served from the same Worke
 
 After deploy, Cloudflare will print the Worker URL.
 
+### Cloudflare Git-linked Worker settings
+
+If you connect this repository directly to **Cloudflare Workers Builds** and want redeploys on every push:
+
+- **Product**: Workers
+- **Repository**: `halcycon/mx-tools`
+- **Production branch**: `main`
+- **Root directory**: repository root (`/`) or leave blank
+- **Build command**: `npm run build` (Cloudflare already runs `npm ci` before this)
+- **Deploy command**: `npx wrangler deploy`
+- **Non-production branch deploy command**: leave default, or `npx wrangler versions upload`
+
+Why these settings work:
+
+- `vite build` outputs the SPA into `dist/`
+- `wrangler.jsonc` points `assets.directory` at `./dist`
+- the Worker entrypoint is `worker/index.ts`
+- `/api/*` requests hit the Worker first, while everything else is served as static SPA assets
+
+This is already the recommended layout for the repo, so **do not split this into Pages + Worker** unless you specifically want separate frontend/backend projects. A single Worker keeps deploys, routing, and local dev simpler.
+
+### Optional Cloudflare dashboard settings
+
+- **Preview URLs**: enabled in `wrangler.jsonc`
+- **Observability**: enabled in `wrangler.jsonc`
+- **Custom domain**: add after the first successful deploy
+
 ## CLI / TUI
 
 ```bash
