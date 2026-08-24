@@ -6,8 +6,8 @@ Private integrated diagnostic tool: DNS, mail authentication, blacklists, RDAP, 
 
 | Command | Description | Web (Worker) | CLI |
 |---------|-------------|--------------|-----|
-| _(bare input)_ | Domain health (fast): MX + SPF + DMARC + blacklist + SOA | ✓ | ✓ |
-| `full` | Domain health (full): fast suite + DKIM + TXT/NS + BIMI/MTA-STS/TLSRPT + DNS health + RDAP | ✓ | ✓ |
+| _(bare input)_ | Domain health report (live progress): MX + SPF + DMARC + blacklist + SOA | ✓ | ✓ |
+| `full` | Email health report (live progress): mail auth, DNS, blacklist, HTTPS, RDAP | ✓ | ✓ |
 | `a` `aaaa` `cname` `mx` `ns` `ptr` `soa` `txt` | DNS lookups | ✓ | ✓ |
 | `spf` `dmarc` `dkim` `bimi` `mta-sts` `tlsrpt` | Email auth / reporting | ✓ | ✓ |
 | `blacklist` | Multi-DNSBL reputation | ✓ | ✓ |

@@ -1,5 +1,6 @@
 import { SELF } from 'cloudflare:test';
 import { describe, it, expect } from 'vitest';
+import { plannedChecks } from '../worker/checks/run';
 
 describe('mx-tools API', () => {
 	it('/api/health', async () => {
@@ -22,5 +23,10 @@ describe('mx-tools API', () => {
 		const body = await res.json<{ tool: string; results: unknown[] }>();
 		expect(body.tool).toBe('a');
 		expect(body.results.length).toBeGreaterThan(0);
+	});
+
+	it('plans auto and full health suites', () => {
+		expect(plannedChecks('auto', 'example.com')).toEqual(['mx', 'spf', 'dmarc', 'blacklist', 'soa']);
+		expect(plannedChecks('full', 'example.com').length).toBe(16);
 	});
 });

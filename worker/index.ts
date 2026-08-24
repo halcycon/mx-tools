@@ -1,5 +1,5 @@
 import { parseQuery, TOOLS, type CheckResult } from './checks/types';
-import { runOne } from './checks/run';
+import { plannedChecks, runOne, streamOne } from './checks/run';
 
 function json(data: unknown, status = 200): Response {
 	return new Response(JSON.stringify(data, null, 2), {
@@ -56,12 +56,20 @@ async function handleLookup(request: Request, url: URL): Promise<Response> {
 
 		(async () => {
 			try {
-				await send('start', { query: raw, tool: parsed.tool, target: parsed.target });
-				const results = await runOne(parsed);
-				for (const r of results) {
+				const planned = plannedChecks(parsed.tool, parsed.target);
+				await send('start', {
+					query: raw,
+					tool: parsed.tool,
+					target: parsed.target,
+					expected: planned.length,
+					checks: planned,
+				});
+				let count = 0;
+				for await (const r of streamOne(parsed)) {
+					count += 1;
 					await send('result', r);
 				}
-				await send('done', { count: results.length });
+				await send('done', { count });
 			} catch (e) {
 				await send('error', { message: e instanceof Error ? e.message : String(e) });
 			} finally {

@@ -525,50 +525,89 @@ export async function runTrace(target: string): Promise<CheckResult> {
 	};
 }
 
+type NamedJob = { name: string; run: () => Promise<CheckResult> };
+
+function autoJobs(target: string): NamedJob[] {
+	return [
+		{ name: 'mx', run: () => runMx(target) },
+		{ name: 'spf', run: () => runSpf(target) },
+		{ name: 'dmarc', run: () => runDmarc(target) },
+		{ name: 'blacklist', run: () => runBlacklist(target) },
+		{ name: 'soa', run: () => runSoa(target) },
+	];
+}
+
+function fullJobs(target: string): NamedJob[] {
+	return [
+		...autoJobs(target),
+		{ name: 'dkim', run: () => runDkim(target, 'default') },
+		{ name: 'txt', run: () => runTxt(target) },
+		{ name: 'ns', run: () => runNs(target) },
+		{ name: 'bimi', run: () => runBimi(target) },
+		{ name: 'mta-sts', run: () => runMtaSts(target) },
+		{ name: 'tlsrpt', run: () => runTlsrpt(target) },
+		{ name: 'dns', run: () => runDnsHealth(target) },
+		{ name: 'https', run: () => runHttp(target, true) },
+		{ name: 'whois', run: () => runWhois(target) },
+		{ name: 'asn', run: () => runAsn(target) },
+		{ name: 'arin', run: () => runArin(target) },
+	];
+}
+
+export function plannedChecks(tool: string, target: string): string[] {
+	if (tool === 'auto') return autoJobs(target).map((j) => j.name);
+	if (tool === 'full') return fullJobs(target).map((j) => j.name);
+	return [tool];
+}
+
+async function* streamPool(jobs: NamedJob[], concurrency = 4): AsyncGenerator<CheckResult> {
+	const slots = new Map<number, Promise<{ id: number; result: CheckResult }>>();
+	let next = 0;
+	let finished = 0;
+
+	const launch = () => {
+		if (next >= jobs.length) return;
+		const id = next;
+		const job = jobs[next++];
+		slots.set(
+			id,
+			job.run().then((result) => ({ id, result })),
+		);
+	};
+
+	while (slots.size < concurrency && next < jobs.length) launch();
+
+	while (finished < jobs.length) {
+		const { id, result } = await Promise.race(slots.values());
+		slots.delete(id);
+		finished += 1;
+		yield result;
+		launch();
+	}
+}
+
 export async function runAutoFast(target: string): Promise<CheckResult[]> {
-	const [mx, spf, dmarc, bl, soa] = await Promise.all([
-		runMx(target),
-		runSpf(target),
-		runDmarc(target),
-		runBlacklist(target),
-		runSoa(target),
-	]);
-	return [mx, spf, dmarc, bl, soa];
+	const out: CheckResult[] = [];
+	for await (const r of streamPool(autoJobs(target))) out.push(r);
+	return out;
 }
 
 export async function runFull(target: string): Promise<CheckResult[]> {
-	// Parallelize cheaper DNS checks, then do RDAP/Cymru (best-effort).
-	const [
-		mx,
-		spf,
-		dmarc,
-		dkim,
-		bl,
-		soa,
-		txt,
-		ns,
-		bimi,
-		mtaSts,
-		tlsrpt,
-	] = await Promise.all([
-		runMx(target),
-		runSpf(target),
-		runDmarc(target),
-		runDkim(target, 'default'),
-		runBlacklist(target),
-		runSoa(target),
-		runTxt(target),
-		runNs(target),
-		runBimi(target),
-		runMtaSts(target),
-		runTlsrpt(target),
-	]);
+	const out: CheckResult[] = [];
+	for await (const r of streamPool(fullJobs(target), 4)) out.push(r);
+	return out;
+}
 
-	// RDAP endpoints are comparatively heavier; keep concurrency lower.
-	const dnsHealth = await runDnsHealth(target);
-	const [whois, asn] = await Promise.all([runWhois(target), runAsn(target)]);
-	const arin = await runArin(target);
-	return [mx, spf, dmarc, dkim, bl, soa, txt, ns, bimi, mtaSts, tlsrpt, dnsHealth, whois, asn, arin];
+export async function* streamOne(q: ParsedQuery): AsyncGenerator<CheckResult> {
+	if (q.tool === 'auto') {
+		yield* streamPool(autoJobs(q.target));
+		return;
+	}
+	if (q.tool === 'full') {
+		yield* streamPool(fullJobs(q.target), 4);
+		return;
+	}
+	for (const r of await runOne(q)) yield r;
 }
 
 export async function runOne(q: ParsedQuery): Promise<CheckResult[]> {

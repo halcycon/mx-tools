@@ -38,8 +38,8 @@ export type ToolDef = {
 };
 
 export const TOOLS: ToolDef[] = [
-	{ id: 'auto', label: 'Domain health (fast)', description: 'MX + SPF + DMARC + blacklist + SOA', platforms: ['worker', 'cli'], example: 'example.com' },
-	{ id: 'full', label: 'Domain health (full)', description: 'Full suite: fast + DKIM + TXT/NS + BIMI/MTA-STS/TLSRPT + DNS health + RDAP', platforms: ['worker', 'cli'], example: 'full:example.com' },
+	{ id: 'auto', label: 'Domain health', description: 'Live health report: MX + SPF + DMARC + blacklist + SOA', platforms: ['worker', 'cli'], example: 'example.com' },
+	{ id: 'full', label: 'Email health report', description: 'Full live report: mail auth, DNS, blacklist, web, RDAP', platforms: ['worker', 'cli'], example: 'full:example.com' },
 	{ id: 'a', label: 'A', description: 'DNS A (IPv4) records', platforms: ['worker', 'cli'], example: 'a:example.com' },
 	{ id: 'aaaa', label: 'AAAA', description: 'DNS AAAA (IPv6) records', platforms: ['worker', 'cli'], example: 'aaaa:example.com' },
 	{ id: 'cname', label: 'CNAME', description: 'DNS CNAME records', platforms: ['worker', 'cli'], example: 'cname:www.example.com' },

@@ -24,6 +24,7 @@ func Run(q ParsedQuery) []Result {
 			RunMTASTS(q.Target),
 			RunTLSRPT(q.Target),
 			RunDNSHealth(q.Target),
+			RunHTTP(q.Target, true),
 			RunWhois(q.Target),
 			RunASN(q.Target),
 			RunARIN(q.Target),

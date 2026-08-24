@@ -1,24 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-
-export type Severity = 'ok' | 'info' | 'warn' | 'fail' | 'error' | 'unsupported';
-
-export type CheckRow = {
-	status: Severity;
-	name: string;
-	value: string;
-	info?: string;
-};
-
-export type CheckResult = {
-	tool: string;
-	title: string;
-	query: string;
-	ok: boolean;
-	summary: string;
-	rows: CheckRow[];
-	related?: Array<{ tool: string; label: string; query: string }>;
-	elapsedMs: number;
-};
+import HealthReport from './HealthReport';
+import type { CheckResult, Severity } from './types';
 
 type ToolDef = {
 	id: string;
@@ -27,7 +9,7 @@ type ToolDef = {
 	example: string;
 };
 
-const EXAMPLES = ['example.com', 'mx:gmail.com', 'spf:github.com', 'blacklist:1.1.1.1', 'dmarc:cloudflare.com'];
+const EXAMPLES = ['example.com', 'full:github.com', 'spf:github.com', 'blacklist:1.1.1.1', 'dmarc:cloudflare.com'];
 
 function ResultCard({
 	result,
@@ -97,6 +79,8 @@ export default function App() {
 			return [];
 		}
 	});
+	const [expected, setExpected] = useState(0);
+	const [report, setReport] = useState(false);
 	const [activeQuery, setActiveQuery] = useState('');
 
 	useEffect(() => {
@@ -140,6 +124,13 @@ export default function App() {
 			setLoading(true);
 			setError(null);
 			setResults([]);
+			const looksReport =
+				tool === 'auto' ||
+				tool === 'full' ||
+				q.startsWith('full:') ||
+				!q.includes(':');
+			setReport(looksReport);
+			setExpected(q.startsWith('full:') || tool === 'full' ? 16 : looksReport ? 5 : 1);
 			setActiveQuery(q);
 			setHistory((h) => [q, ...h.filter((x) => x !== q)].slice(0, 30));
 
@@ -170,6 +161,11 @@ export default function App() {
 						}
 						if (!data) continue;
 						const parsed = JSON.parse(data);
+						if (event === 'start') {
+							const n = Number(parsed.expected) || 0;
+							setExpected(n);
+							setReport(parsed.tool === 'auto' || parsed.tool === 'full' || n > 1);
+						}
 						if (event === 'result') setResults((r) => [...r, parsed as CheckResult]);
 						if (event === 'error') setError(parsed.message ?? 'Lookup failed');
 					}
@@ -180,12 +176,21 @@ export default function App() {
 				setLoading(false);
 			}
 		},
-		[buildQuery],
+		[buildQuery, tool],
 	);
 
 	const onSubmit = (e: FormEvent) => {
 		e.preventDefault();
 		void run();
+	};
+
+	const runHealth = () => {
+		const raw = target.trim();
+		if (!raw) return;
+		const host = raw.includes(':') ? raw.slice(raw.indexOf(':') + 1) : raw;
+		setTool('full');
+		setTarget(host);
+		void run(`full:${host}`);
 	};
 
 	const applyExample = (ex: string) => {
@@ -230,6 +235,9 @@ export default function App() {
 				/>
 				<button type="submit" disabled={loading || !target.trim()}>
 					{loading ? 'Running…' : 'Lookup'}
+				</button>
+				<button type="button" className="health-btn" disabled={loading || !target.trim()} onClick={runHealth}>
+					Email health report
 				</button>
 			</form>
 
@@ -278,12 +286,22 @@ export default function App() {
 				<section className="panel results">
 					{error && <p className="empty" style={{ color: 'var(--fail)' }}>{error}</p>}
 					{!error && results.length === 0 && !loading && (
-						<p className="empty">Enter a domain or try <code>mx:example.com</code></p>
+						<p className="empty">
+							Enter a domain and run <strong>Email health report</strong>, or try <code>full:example.com</code>
+						</p>
 					)}
-					{loading && results.length === 0 && <p className="empty">Running checks…</p>}
-					{results.map((r, i) => (
-						<ResultCard key={`${r.tool}-${i}`} result={r} onRelated={(q) => void run(q)} />
-					))}
+					{(report || expected > 1) && (loading || results.length > 0) ? (
+						<HealthReport
+							query={activeQuery}
+							target={activeQuery.includes(':') ? activeQuery.slice(activeQuery.indexOf(':') + 1) : activeQuery}
+							results={results}
+							expected={expected || results.length}
+							loading={loading}
+							onOpen={(q) => void run(q)}
+						/>
+					) : (
+						results.map((r, i) => <ResultCard key={`${r.tool}-${i}`} result={r} onRelated={(q) => void run(q)} />)
+					)}
 				</section>
 			</div>
 
