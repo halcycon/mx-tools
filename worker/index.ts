@@ -1,4 +1,5 @@
 import { parseQuery, TOOLS, type CheckResult, type LookupOptions } from './checks/types';
+import { analyzeHeaders, HEADER_MAX_BYTES } from './checks/headers';
 import { plannedChecks, runOne, streamOne } from './checks/run';
 
 type WorkerEnv = Env & { SPAMHAUS_DQS_KEY?: string };
@@ -125,6 +126,22 @@ export default {
 			return json({
 				spamhausDqsConfigured: Boolean(bindings.SPAMHAUS_DQS_KEY?.trim()),
 			});
+		}
+
+		if (url.pathname === '/api/headers') {
+			if (request.method !== 'POST') {
+				return json({ error: 'POST JSON { "raw": "<header block>" }' }, 405);
+			}
+			try {
+				const body = (await request.json()) as { raw?: string };
+				const raw = typeof body.raw === 'string' ? body.raw : '';
+				if (raw.length > HEADER_MAX_BYTES) {
+					return json({ error: `Header too large (max ${HEADER_MAX_BYTES} bytes)` }, 413);
+				}
+				return json({ results: analyzeHeaders(raw) });
+			} catch (e) {
+				return json({ error: e instanceof Error ? e.message : String(e) }, 400);
+			}
 		}
 
 		if (url.pathname === '/api/lookup' || url.pathname === '/api/supertool') {

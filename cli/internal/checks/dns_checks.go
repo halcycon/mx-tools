@@ -289,7 +289,9 @@ func RunSPF(target string) Result {
 	if len(spf) > 0 {
 		sum = spf[0]
 	}
-	return Base("spf", "SPF Record", target, rows, sum, start, len(spf) == 1)
+	r := Base("spf", "SPF Record", target, rows, sum, start, len(spf) == 1)
+	r.Related = []Related{{Tool: "spf-flat", Label: "Flatten SPF", Query: "spf-flat:" + target}}
+	return r
 }
 
 func RunDMARC(target string) Result {

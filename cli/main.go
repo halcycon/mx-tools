@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -34,6 +35,9 @@ func main() {
 	query := ""
 	if len(filtered) > 0 {
 		query = filtered[0]
+	}
+	if strings.EqualFold(query, "headers") && len(filtered) > 1 {
+		query = "headers:" + filtered[1]
 	}
 
 	if oneshot || jsonOut {
@@ -78,21 +82,25 @@ Usage:
   mx                  Interactive TUI
   mx example.com      TUI prefilled / auto-run
   mx --once mx:a.com  One-shot text output
-  mx --json spf:a.com JSON output
+  mx --json spf-flat:a.com JSON output
 
 Commands (prefix:target):
   auto full
   a aaaa cname mx ns ptr soa txt
-  spf dmarc dkim bimi mta-sts tlsrpt
+  spf spf-flat dmarc dkim bimi mta-sts tlsrpt
   blacklist dns whois arin asn
   http https tcp smtp ping trace
+  headers
 
 Examples:
   mx example.com
   mx blacklist:127.0.0.2
+  mx --once headers message.eml
+  mx --json headers < headers.txt
   mx dkim:google:gmail.com
   mx tcp:example.com:443
-  mx smtp:gmail.com
+  mx smtp:smtp.gmail.com
+  mx smtp:example.com:587
 
 Spamhaus DQS (private):
   export SPAMHAUS_DQS_KEY=...`)

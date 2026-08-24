@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import HealthReport from './HealthReport';
 import Settings, { loadKeys } from './Settings';
+import ToolGuide from './ToolGuide';
 import type { CheckResult } from './types';
+import { analyzeHeaders } from '@engine/headers';
+import { guideTool } from './tools-guide';
 
 type ToolDef = {
 	id: string;
@@ -10,7 +13,7 @@ type ToolDef = {
 	example: string;
 };
 
-const EXAMPLES = ['example.com', 'full:github.com', 'spf:github.com', 'blacklist:1.1.1.1', 'dmarc:cloudflare.com'];
+const EXAMPLES = ['example.com', 'full:github.com', 'spf-flat:github.com', 'blacklist:1.1.1.1', 'dmarc:cloudflare.com'];
 
 function ResultCard({
 	result,
@@ -84,7 +87,9 @@ export default function App() {
 	const [report, setReport] = useState(false);
 	const [activeQuery, setActiveQuery] = useState('');
 	const [settingsOpen, setSettingsOpen] = useState(false);
+	const [guideOpen, setGuideOpen] = useState(false);
 	const [serverHasDqs, setServerHasDqs] = useState(false);
+	const [headerRaw, setHeaderRaw] = useState('');
 	const [detail, setDetail] = useState<{ query: string; results: CheckResult[]; loading: boolean } | null>(null);
 	const [reportSnap, setReportSnap] = useState<{
 		query: string;
@@ -120,12 +125,31 @@ export default function App() {
 		localStorage.setItem('mx-tools-history', JSON.stringify(history.slice(0, 30)));
 	}, [history]);
 
+	useEffect(() => {
+		if (!guideOpen) return;
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') setGuideOpen(false);
+		};
+		window.addEventListener('keydown', onKey);
+		return () => window.removeEventListener('keydown', onKey);
+	}, [guideOpen]);
+
 	const toolOptions = useMemo(() => {
 		const list = tools.length
 			? tools
 			: [{ id: 'auto', label: 'Domain health', description: '', example: '' }];
 		return list.filter((t) => t.id !== 'ping' && t.id !== 'trace');
 	}, [tools]);
+
+	const selectedMeta = useMemo(() => {
+		const fromApi = toolOptions.find((t) => t.id === tool);
+		const fromGuide = guideTool(tool);
+		return {
+			label: fromApi?.label ?? fromGuide?.label ?? tool,
+			description: fromGuide?.blurb ?? fromApi?.description ?? '',
+			example: fromApi?.example ?? fromGuide?.example ?? '',
+		};
+	}, [tool, toolOptions]);
 
 	const consumeStream = useCallback(async (q: string, onEvent: (event: string, parsed: Record<string, unknown>) => void) => {
 		const key = loadKeys().spamhausDqs.trim();
@@ -197,6 +221,7 @@ export default function App() {
 				return;
 			}
 
+			setGuideOpen(false);
 			setDetail(null);
 			setReportSnap(null);
 			setLoading(true);
@@ -208,7 +233,7 @@ export default function App() {
 				q.startsWith('full:') ||
 				!q.includes(':');
 			setReport(looksReport);
-			setExpected(q.startsWith('full:') || tool === 'full' ? 16 : looksReport ? 5 : 1);
+			setExpected(q.startsWith('full:') || tool === 'full' ? 17 : looksReport ? 5 : 1);
 			setActiveQuery(q);
 			setHistory((h) => [q, ...h.filter((x) => x !== q)].slice(0, 30));
 
@@ -243,10 +268,25 @@ export default function App() {
 		[activeQuery, expected, results, run],
 	);
 
-	const onSubmit = (e: FormEvent) => {
-		e.preventDefault();
-		void run();
-	};
+	const runHeaders = useCallback(() => {
+		setGuideOpen(false);
+		setDetail(null);
+		setReportSnap(null);
+		setReport(false);
+		setError(null);
+		setExpected(1);
+		setActiveQuery('headers');
+		setHistory((h) => ['headers', ...h.filter((x) => x !== 'headers')].slice(0, 30));
+		setLoading(true);
+		try {
+			setResults(analyzeHeaders(headerRaw));
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+			setResults([]);
+		} finally {
+			setLoading(false);
+		}
+	}, [headerRaw]);
 
 	const runHealth = () => {
 		const raw = target.trim();
@@ -257,7 +297,21 @@ export default function App() {
 		void run(`full:${host}`);
 	};
 
+	const onSubmit = (e: FormEvent) => {
+		e.preventDefault();
+		if (tool === 'headers') {
+			runHeaders();
+			return;
+		}
+		void run();
+	};
+
 	const applyExample = (ex: string) => {
+		if (ex === 'headers') {
+			setTool('headers');
+			setGuideOpen(false);
+			return;
+		}
 		const colon = ex.indexOf(':');
 		if (colon > 0) {
 			setTool(ex.slice(0, colon));
@@ -269,48 +323,122 @@ export default function App() {
 		void run(ex);
 	};
 
+	const pickTool = (id: string) => {
+		setTool(id);
+		setGuideOpen(false);
+		const g = guideTool(id);
+		if (g?.example && id !== 'auto' && id !== 'headers' && id !== 'full') {
+			const colon = g.example.indexOf(':');
+			if (colon > 0) setTarget(g.example.slice(colon + 1));
+		}
+	};
+
+	const showLanding = !error && results.length === 0 && !loading && !detail;
+
 	return (
 		<div className="app">
 			<div className="brand">
 				<h1>
 					mx<span>-tools</span>
 				</h1>
-				<button type="button" className="settings-btn" onClick={() => setSettingsOpen(true)}>
-					Settings
-				</button>
+				<div className="brand-actions">
+					<button type="button" className="settings-btn" onClick={() => setGuideOpen(true)}>
+						Tools guide
+					</button>
+					<button type="button" className="settings-btn" onClick={() => setSettingsOpen(true)}>
+						Settings
+					</button>
+				</div>
 			</div>
 			<p className="tagline">
-				D.A.R.T. (Domain Authentication & Reputation Toolkit) for DNS, mail auth, blacklists, and network
-				lookups — same checks in the web UI and CLI.
+				D.A.R.T. (Domain Authentication & Reputation Toolkit) — DNS, mail auth, blacklists, and connectivity.
+				Same checks in the web UI and CLI.
 			</p>
 
-			<form className="search" onSubmit={onSubmit}>
-				<select value={tool} onChange={(e) => setTool(e.target.value)} aria-label="Tool">
-					{toolOptions.map((t) => (
-						<option key={t.id} value={t.id}>
-							{t.label}
-						</option>
-					))}
+			<form className={`search${tool === 'headers' ? ' headers-mode' : ''}`} onSubmit={onSubmit}>
+				<select
+					value={tool}
+					onChange={(e) => setTool(e.target.value)}
+					aria-label="Tool"
+					title={selectedMeta.description}
+				>
+					{toolOptions.map((t) => {
+						const tip = guideTool(t.id)?.blurb ?? t.description;
+						return (
+							<option key={t.id} value={t.id} title={tip}>
+								{t.label}
+							</option>
+						);
+					})}
 				</select>
-				<input
-					value={target}
-					onChange={(e) => setTarget(e.target.value)}
-					placeholder="domain, IP, or command:target"
-					spellCheck={false}
-					autoCapitalize="off"
-					autoCorrect="off"
-				/>
-				<button type="submit" disabled={loading || !target.trim()}>
-					{loading ? 'Running…' : 'Lookup'}
-				</button>
-				<button type="button" className="health-btn" disabled={loading || !target.trim()} onClick={runHealth}>
-					Email health report
-				</button>
+				{tool === 'headers' ? (
+					<>
+						<textarea
+							value={headerRaw}
+							onChange={(e) => setHeaderRaw(e.target.value)}
+							placeholder="Paste raw email headers (RFC 5322). The message body is ignored."
+							spellCheck={false}
+							aria-label="Paste header"
+						/>
+						<button type="submit" disabled={loading || !headerRaw.trim()} title="Parse headers in this browser">
+							{loading ? 'Analyzing…' : 'Analyze headers'}
+						</button>
+					</>
+				) : (
+					<>
+						<input
+							value={target}
+							onChange={(e) => setTarget(e.target.value)}
+							placeholder={tool === 'auto' || tool === 'full' ? 'example.com' : 'domain, IP, or host'}
+							spellCheck={false}
+							autoCapitalize="off"
+							autoCorrect="off"
+							title={selectedMeta.description}
+						/>
+						<button
+							type="submit"
+							disabled={loading || !target.trim()}
+							title={
+								tool === 'auto'
+									? 'Run Domain health (MX, SPF, DMARC, blacklist, SOA)'
+									: tool === 'full'
+										? 'Run Email health report (deep suite)'
+										: `Run ${selectedMeta.label}`
+							}
+						>
+							{loading ? 'Running…' : tool === 'auto' ? 'Domain health' : tool === 'full' ? 'Email health' : 'Lookup'}
+						</button>
+						<button
+							type="button"
+							className="health-btn"
+							disabled={loading || !target.trim()}
+							onClick={runHealth}
+							title="Email health report: Domain health plus SPF flatten, DKIM, BIMI, MTA-STS, TLSRPT, DNS, HTTPS, and RDAP"
+						>
+							Email health report
+						</button>
+					</>
+				)}
 			</form>
+
+			{selectedMeta.description ? (
+				<p className="tool-tip" role="note">
+					<span className="tool-tip-label">{selectedMeta.label}</span>
+					{selectedMeta.description}
+					{selectedMeta.example ? (
+						<>
+							{' '}
+							<button type="button" className="linkish" onClick={() => applyExample(selectedMeta.example)}>
+								Example: {selectedMeta.example}
+							</button>
+						</>
+					) : null}
+				</p>
+			) : null}
 
 			<div className="hints">
 				{EXAMPLES.map((ex) => (
-					<button key={ex} type="button" onClick={() => applyExample(ex)}>
+					<button key={ex} type="button" onClick={() => applyExample(ex)} title={`Run ${ex}`}>
 						{ex}
 					</button>
 				))}
@@ -331,6 +459,11 @@ export default function App() {
 										type="button"
 										className={h === activeQuery ? 'active' : ''}
 										onClick={() => {
+											if (h === 'headers') {
+												setTool('headers');
+												runHeaders();
+												return;
+											}
 											const c = h.indexOf(':');
 											if (c > 0 && c < 16) {
 												setTool(h.slice(0, c));
@@ -378,10 +511,8 @@ export default function App() {
 								<ResultCard key={`${r.tool}-${i}`} result={r} onRelated={(q) => void run(q, 'detail')} />
 							))}
 						</>
-					) : !error && results.length === 0 && !loading ? (
-						<p className="empty">
-							Enter a domain and run <strong>Email health report</strong>, or try <code>full:example.com</code>
-						</p>
+					) : showLanding ? (
+						<ToolGuide mode="landing" onPickTool={pickTool} onRunExample={applyExample} />
 					) : (report || expected > 1) && (loading || results.length > 0) ? (
 						<HealthReport
 							query={activeQuery}
@@ -398,10 +529,22 @@ export default function App() {
 			</div>
 
 			<p className="footer">
-				CLI: <code>mx example.com</code> · <code>mx blacklist:1.2.3.4</code> · SMTP/ping/traceroute work best in
-				the TUI (Workers block ICMP and port 25).
+				CLI: <code>mx example.com</code> · <code>mx full:example.com</code> · <code>mx blacklist:1.2.3.4</code> ·
+				SMTP/ping/traceroute: TUI preferred (Workers block ICMP and outbound port 25; 587/465 work here).
 			</p>
 			<Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} serverHasDqs={serverHasDqs} />
+			{guideOpen ? (
+				<div className="guide-backdrop" role="dialog" aria-modal="true" aria-label="Tools guide">
+					<div className="guide-sheet panel">
+						<ToolGuide
+							mode="guide"
+							onClose={() => setGuideOpen(false)}
+							onPickTool={pickTool}
+							onRunExample={applyExample}
+						/>
+					</div>
+				</div>
+			) : null}
 		</div>
 	);
 }

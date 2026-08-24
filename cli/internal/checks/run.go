@@ -14,6 +14,7 @@ func Run(q ParsedQuery) []Result {
 		return []Result{
 			RunMX(q.Target),
 			RunSPF(q.Target),
+			RunSPFFlat(q.Target),
 			RunDMARC(q.Target),
 			RunDKIM(q.Target, "default"),
 			RunBlacklist(q.Target),
@@ -47,6 +48,8 @@ func Run(q ParsedQuery) []Result {
 		return []Result{RunTXT(q.Target)}
 	case "spf":
 		return []Result{RunSPF(q.Target)}
+	case "spf-flat":
+		return []Result{RunSPFFlat(q.Target)}
 	case "dmarc":
 		return []Result{RunDMARC(q.Target)}
 	case "dkim":
@@ -74,7 +77,9 @@ func Run(q ParsedQuery) []Result {
 	case "tcp":
 		return []Result{RunTCP(q.Target, q.Extra)}
 	case "smtp":
-		return []Result{RunSMTP(q.Target)}
+		return []Result{RunSMTP(q.Target, q.Extra)}
+	case "headers":
+		return RunHeaders(q.Target)
 	case "ping":
 		return []Result{RunPing(q.Target)}
 	case "trace":

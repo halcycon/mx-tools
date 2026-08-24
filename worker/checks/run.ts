@@ -1,6 +1,9 @@
 import { answersOf, doh, isIp, resolveHostToIps, reverseIp, stripTxt } from './dns';
 import { interpretDnsblCodes, spamhausZone } from './dnsbl-codes';
 import { DNSBLS } from './dnsbls';
+import { runSpfFlat } from './spf-flat';
+import { runSmtp } from './smtp';
+import { selectBlacklistIps } from './cloudflare-ips';
 import type { CheckResult, CheckRow, LookupOptions, ParsedQuery, Severity } from './types';
 
 function timed(): { start: number; done: () => number } {
@@ -171,7 +174,9 @@ export async function runSpf(target: string): Promise<CheckResult> {
 		rows.push({ status: 'fail', name: 'Policy', value: 'Multiple SPF records (invalid)' });
 	}
 	if (!spf.length) rows.push({ status: 'fail', name: 'SPF', value: 'Not found' });
-	return base('spf', 'SPF Record', target, rows, spf[0] ?? 'Missing SPF', t.done(), spf.length === 1);
+	const result = base('spf', 'SPF Record', target, rows, spf[0] ?? 'Missing SPF', t.done(), spf.length === 1);
+	result.related = [{ tool: 'spf-flat', label: 'Flatten SPF', query: `spf-flat:${target}` }];
+	return result;
 }
 
 export async function runDmarc(target: string): Promise<CheckResult> {
@@ -264,21 +269,58 @@ export async function runMtaSts(target: string): Promise<CheckResult> {
 
 export async function runBlacklist(target: string, opts: LookupOptions = {}): Promise<CheckResult> {
 	const t = timed();
-	const ips = await resolveHostToIps(target);
-	if (!ips.length) {
+	let web: string[] = [];
+	let mx: Array<{ host: string; ips: string[] }> = [];
+	if (isIp(target)) {
+		web = [target];
+	} else {
+		const [webIps, mxResp] = await Promise.all([resolveHostToIps(target), doh(target, 'MX')]);
+		web = webIps;
+		const hosts = answersOf(mxResp, 'MX')
+			.map((a) => {
+				const [pref, host] = a.data.split(/\s+/);
+				return { pref: Number(pref), host: host?.replace(/\.$/, '') ?? '' };
+			})
+			.filter((m) => m.host && m.host !== '.')
+			.sort((a, b) => a.pref - b.pref)
+			.slice(0, 3);
+		mx = await Promise.all(
+			hosts.map(async (m) => ({ host: m.host, ips: await resolveHostToIps(m.host) })),
+		);
+	}
+
+	const { check, skipped } = selectBlacklistIps(web, mx);
+	if (!check.length && !skipped.length) {
 		return base('blacklist', 'Blacklist Check', target, [{ status: 'error', name: 'Resolve', value: 'No IPs' }], 'Cannot resolve', t.done(), false);
+	}
+
+	const rows: CheckRow[] = [];
+	if (check.length) {
+		rows.push({
+			status: 'info',
+			name: 'Checking',
+			value: check.map((a) => `${a.ip} (${a.role})`).join(', '),
+			info: mx.length
+				? 'Mail reputation uses MX host IPs. Website A records that are Cloudflare proxies are skipped.'
+				: undefined,
+		});
+	}
+		for (const a of skipped) {
+		rows.push({
+			status: 'warn',
+			name: `Cloudflare proxy (${a.ip})`,
+			value: 'Skipped DNSBL (CDN edge)',
+			info: 'Cloudflare orange-cloud / anycast proxy — this is the CDN edge for the website, not the mail origin or the Worker making the query. DNSBLs are run against MX IPs instead.',
+		});
 	}
 
 	const lists = DNSBLS.map((bl) => (bl.zone.includes('spamhaus') ? { ...bl, ...spamhausZone(opts.spamhausDqsKey) } : bl));
 
-	const rows: CheckRow[] = [];
 	let listed = 0;
 	let queryErrors = 0;
-	// Prefer IPv4 for classic DNSBLs
-	const checkIps = ips.filter((ip) => !ip.includes(':')).length ? ips.filter((ip) => !ip.includes(':')) : ips;
 
-	for (const ip of checkIps.slice(0, 3)) {
-		const rev = reverseIp(ip);
+	for (const addr of check) {
+		const rev = reverseIp(addr.ip);
 		if (!rev) continue;
 		const chunkSize = 8;
 		for (let i = 0; i < lists.length; i += chunkSize) {
@@ -288,9 +330,9 @@ export async function runBlacklist(target: string, opts: LookupOptions = {}): Pr
 					const q = `${rev}.${bl.zone}`;
 					try {
 						const resp = await doh(q, 'A');
-						return { bl, ip, answers: answersOf(resp, 'A').map((a) => a.data) };
+						return { bl, answers: answersOf(resp, 'A').map((a) => a.data) };
 					} catch {
-						return { bl, ip, answers: [] as string[] };
+						return { bl, answers: [] as string[] };
 					}
 				}),
 			);
@@ -301,9 +343,9 @@ export async function runBlacklist(target: string, opts: LookupOptions = {}): Pr
 				if (interp.kind === 'query_error') queryErrors++;
 				rows.push({
 					status: interp.status,
-					name: `${r.bl.name} (${ip})`,
+					name: `${r.bl.name} (${addr.ip})`,
 					value: interp.label,
-					info: interp.detail + (r.bl.url ? ` ${r.bl.url}` : ''),
+					info: `${addr.role}. ${interp.detail}${r.bl.url ? ` ${r.bl.url}` : ''}`,
 				});
 			}
 		}
@@ -504,18 +546,6 @@ export async function runTcp(host: string, portStr = '443'): Promise<CheckResult
 	}
 }
 
-export async function runSmtp(_target: string): Promise<CheckResult> {
-	return {
-		tool: 'smtp',
-		title: 'SMTP Test',
-		query: _target,
-		ok: false,
-		summary: 'Port 25 blocked on Cloudflare Workers — use the CLI (`mx smtp:host`)',
-		rows: [{ status: 'unsupported', name: 'SMTP', value: 'Use CLI for port 25 banner checks' }],
-		elapsedMs: 0,
-	};
-}
-
 export async function runPing(target: string): Promise<CheckResult> {
 	return {
 		tool: 'ping',
@@ -555,6 +585,7 @@ function autoJobs(target: string, opts: LookupOptions = {}): NamedJob[] {
 function fullJobs(target: string, opts: LookupOptions = {}): NamedJob[] {
 	return [
 		...autoJobs(target, opts),
+		{ name: 'spf-flat', run: () => runSpfFlat(target) },
 		{ name: 'dkim', run: () => runDkim(target, 'default') },
 		{ name: 'txt', run: () => runTxt(target) },
 		{ name: 'ns', run: () => runNs(target) },
@@ -650,6 +681,8 @@ export async function runOne(q: ParsedQuery, opts: LookupOptions = {}): Promise<
 			return [await runTxt(target)];
 		case 'spf':
 			return [await runSpf(target)];
+		case 'spf-flat':
+			return [await runSpfFlat(target)];
 		case 'dmarc':
 			return [await runDmarc(target)];
 		case 'dkim':
@@ -677,7 +710,19 @@ export async function runOne(q: ParsedQuery, opts: LookupOptions = {}): Promise<
 		case 'tcp':
 			return [await runTcp(target, extra ?? '443')];
 		case 'smtp':
-			return [await runSmtp(target)];
+			return [await runSmtp(target, extra)];
+		case 'headers':
+			return [
+				{
+					tool: 'headers',
+					title: 'Email headers',
+					query: 'headers',
+					ok: false,
+					summary: 'POST /api/headers with JSON { "raw": "<header block>" }. Header dumps are too large for tool:target queries.',
+					rows: [],
+					elapsedMs: 0,
+				},
+			];
 		case 'ping':
 			return [await runPing(target)];
 		case 'trace':

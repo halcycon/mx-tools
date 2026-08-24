@@ -9,15 +9,24 @@ Private integrated diagnostic tool: DNS, mail authentication, blacklists, RDAP, 
 | _(bare input)_ | Domain health report (live progress): MX + SPF + DMARC + blacklist + SOA | ✓ | ✓ |
 | `full` | Email health report (live progress): mail auth, DNS, blacklist, HTTPS, RDAP | ✓ | ✓ |
 | `a` `aaaa` `cname` `mx` `ns` `ptr` `soa` `txt` | DNS lookups | ✓ | ✓ |
-| `spf` `dmarc` `dkim` `bimi` `mta-sts` `tlsrpt` | Email auth / reporting | ✓ | ✓ |
+| `spf` `spf-flat` `dmarc` `dkim` `bimi` `mta-sts` `tlsrpt` | Email auth / SPF flattening / reporting | ✓ | ✓ |
+| `headers` | Parse pasted RFC 5322 headers (hops, auth, spam scores) | ✓ | ✓ |
 | `blacklist` | Multi-DNSBL reputation | ✓ | ✓ |
 | `dns` | Nameserver health | ✓ | ✓ |
 | `whois` `arin` `asn` | RDAP / Cymru ASN | ✓ | ✓ |
 | `http` `https` `tcp` | Connectivity | ✓* | ✓ |
-| `smtp` | SMTP banner (port 25) | ✗ (Workers block :25) | ✓ |
+| `smtp` | SMTP banner: **587** STARTTLS + **465** SMTPS on the Worker; CLI also probes **25** (MX) | ✓ | ✓ |
 | `ping` `trace` | ICMP | ✗ | ✓ |
 
-\* TCP port **25** is blocked on Cloudflare Workers; use the CLI for SMTP.
+\* Outbound **port 25** is blocked on Cloudflare Workers ([TCP sockets](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/)). Submission **587** (STARTTLS) and **465** (implicit TLS) are allowed. The Worker never authenticates. Use the CLI for inbound port 25. Submission usually lives on an MSA host (`smtp.example.com`), not the MX.
+
+`spf-flat:` (alias `flatten:`) expands `include` / `a` / `mx` into `ip4`/`ip6` and counts RFC 7208 DNS lookups. It does **not** publish DNS for you — copy the flattened record if you choose to use it, and re-run after ESP IP changes.
+
+Health reports can **Save baseline** in this browser (problem IDs for that host). Re-run later to see new vs resolved findings. That is local change detection, not a hosted monitor.
+
+These commercial extras are out of scope here: inbox placement (needs seed mailboxes), recipient complaint / FBL feeds, ESP delivery telemetry, and SMTP round-trip latency from Workers.
+
+Header analyzer: paste a header dump in the web UI (**Header analyzer** tool). Parsing runs in the browser. CLI: `mx --once headers message.eml` or `mx --json headers < headers.txt`. Optional API: `POST /api/headers` with `{ "raw": "..." }`.
 
 ## Web (Cloudflare Worker + SPA)
 
@@ -108,7 +117,10 @@ mx:example.com
 blacklist:1.2.3.4
 dkim:selector:example.com
 tcp:example.com:443
+spf-flat:example.com
+headers
 smtp:example.com
+smtp:smtp.gmail.com:587
 full:example.com
 ```
 

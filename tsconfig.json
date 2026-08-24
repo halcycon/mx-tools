@@ -11,7 +11,10 @@
     "types": ["./worker-configuration.d.ts", "@types/node"],
     "isolatedModules": true,
     "resolveJsonModule": true,
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "paths": {
+      "@engine/*": ["./worker/checks/*"]
+    }
   },
   "include": ["worker/**/*.ts", "web/src/**/*.tsx", "web/src/**/*.ts", "vite.config.ts"]
 }

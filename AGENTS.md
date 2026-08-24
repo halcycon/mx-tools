@@ -20,7 +20,7 @@ Private integrated diagnostic tool: Cloudflare Worker web app + Go Bubble Tea CL
 ## Cloudflare notes
 
 - Retrieve current Workers docs before changing platform APIs.
-- Port **25** and **ICMP** are unavailable on Workers; CLI implements SMTP/ping/trace.
+- Port **25** is blocked for outbound TCP on Workers; SMTP **587** / **465** work. ICMP and inbound port 25 stay CLI-only.
 - After binding changes: `npm run cf-typegen`.
 
 ## Conventions

@@ -27,7 +27,22 @@ describe('mx-tools API', () => {
 
 	it('plans auto and full health suites', () => {
 		expect(plannedChecks('auto', 'example.com')).toEqual(['mx', 'spf', 'dmarc', 'blacklist', 'soa']);
-		expect(plannedChecks('full', 'example.com').length).toBe(16);
+		expect(plannedChecks('full', 'example.com')).toContain('spf-flat');
+		expect(plannedChecks('full', 'example.com').length).toBe(17);
+	});
+
+	it('/api/headers parses a dump', async () => {
+		const res = await SELF.fetch('http://example.com/api/headers', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({
+				raw: 'From: a@example.com\r\nSubject: Hi\r\nReceived: from a.example by b.example; Mon, 24 Aug 2026 10:00:00 +0000\r\n',
+			}),
+		});
+		expect(res.status).toBe(200);
+		const body = await res.json<{ results: Array<{ tool: string }> }>();
+		expect(body.results.some((r) => r.tool === 'headers')).toBe(true);
+		expect(body.results.some((r) => r.tool === 'headers-hops')).toBe(true);
 	});
 
 	it('/api/config does not leak secrets', async () => {

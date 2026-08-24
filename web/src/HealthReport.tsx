@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CheckResult, Severity } from './types';
 
 export type CategoryId = 'problems' | 'blacklist' | 'mail' | 'web' | 'dns';
 
-const MAIL_TOOLS = new Set(['mx', 'smtp', 'spf', 'dmarc', 'dkim', 'bimi', 'mta-sts', 'tlsrpt']);
+const MAIL_TOOLS = new Set(['mx', 'smtp', 'spf', 'spf-flat', 'dmarc', 'dkim', 'bimi', 'mta-sts', 'tlsrpt']);
 const WEB_TOOLS = new Set(['http', 'https', 'tcp']);
 const DNS_TOOLS = new Set(['a', 'aaaa', 'cname', 'ns', 'ptr', 'soa', 'txt', 'dns', 'whois', 'arin', 'asn']);
 
@@ -33,6 +33,8 @@ export function resultTone(result: CheckResult): 'pass' | 'warn' | 'error' | 'sk
 export type Problem = {
 	id: string;
 	tool: string;
+	/** Shown in the category column (list name for DNSBLs). */
+	label: string;
 	category: Exclude<CategoryId, 'problems'>;
 	host: string;
 	result: string;
@@ -40,20 +42,29 @@ export type Problem = {
 	info?: string;
 };
 
+/** Blacklist rows are named `List name (1.2.3.4)`. */
+export function parseBlacklistRowName(name: string): { list: string; ip: string } | null {
+	const m = /^(.*) \(([^)]+)\)$/.exec(name);
+	if (!m) return null;
+	return { list: m[1], ip: m[2] };
+}
+
 export function problemsFrom(results: CheckResult[]): Problem[] {
 	const out: Problem[] = [];
 	for (const res of results) {
 		for (const [i, row] of res.rows.entries()) {
 			const tone = rowTone(row.status);
 			if (tone !== 'error' && tone !== 'warn') continue;
+			const bl = res.tool === 'blacklist' ? parseBlacklistRowName(row.name) : null;
 			out.push({
 				id: `${res.tool}-${i}-${row.name}`,
 				tool: res.tool,
+				label: bl?.list ?? res.tool,
 				category: categoryOf(res.tool),
-				host: res.query,
+				host: bl?.ip ?? res.query,
 				result: row.value || res.summary,
 				tone,
-				info: row.info || row.name,
+				info: row.info || (bl ? undefined : row.name),
 			});
 		}
 	}
@@ -102,6 +113,26 @@ function worst(c: Counts): 'error' | 'warn' | 'ok' | 'idle' {
 	if (c.warnings) return 'warn';
 	if (c.passed) return 'ok';
 	return 'idle';
+}
+
+type Baseline = { savedAt: string; ids: string[] };
+
+function baselineKey(target: string) {
+	return `dart-baseline:${target.replace(/\.$/, '').toLowerCase()}`;
+}
+
+function loadBaseline(target: string): Baseline | null {
+	if (!target || typeof localStorage === 'undefined') return null;
+	try {
+		const raw = localStorage.getItem(baselineKey(target));
+		return raw ? (JSON.parse(raw) as Baseline) : null;
+	} catch {
+		return null;
+	}
+}
+
+function problemIds(problems: Problem[]) {
+	return [...new Set(problems.map((p) => p.id))].sort();
 }
 
 function Card({
@@ -178,6 +209,21 @@ export default function HealthReport({
 	const restPct = Math.max(0, 100 - passPct - warnPct - errPct);
 
 	const [tab, setTab] = useState<CategoryId>('problems');
+	const [baseline, setBaseline] = useState<Baseline | null>(() => loadBaseline(target));
+
+	useEffect(() => {
+		setBaseline(loadBaseline(target));
+	}, [target]);
+
+	const ids = useMemo(() => problemIds(problems), [problems]);
+	const diff = useMemo(() => {
+		if (!baseline || loading) return null;
+		const prev = new Set(baseline.ids);
+		const cur = new Set(ids);
+		const added = ids.filter((id) => !prev.has(id)).length;
+		const resolved = baseline.ids.filter((id) => !cur.has(id)).length;
+		return { added, resolved };
+	}, [baseline, ids, loading]);
 
 	const problemCounts: Counts = {
 		errors: problems.filter((p) => p.tone === 'error').length,
@@ -191,6 +237,9 @@ export default function HealthReport({
 			: problems.filter((p) => p.category === tab);
 
 	const title = query.startsWith('full:') ? 'Email health report' : 'Domain health report';
+	const subtitle = query.startsWith('full:')
+		? 'Deep suite: Domain health plus SPF flatten, DKIM, BIMI, MTA-STS, TLSRPT, DNS, HTTPS, RDAP'
+		: 'Quick suite: MX, SPF, DMARC, blacklist, SOA';
 
 	return (
 		<div className="report">
@@ -200,6 +249,7 @@ export default function HealthReport({
 					<h2>
 						{title} <span>{target || query}</span>
 					</h2>
+					<p className="report-sub">{subtitle}</p>
 				</div>
 				<div className="report-status" aria-live="polite">
 					{loading ? (
@@ -209,6 +259,28 @@ export default function HealthReport({
 					) : (
 						<>{done} tests complete</>
 					)}
+					{!loading && target ? (
+						<div className="baseline">
+							{diff ? (
+								<span>
+									vs saved: {diff.added} new, {diff.resolved} resolved
+								</span>
+							) : (
+								<span>No saved snapshot for this host</span>
+							)}
+							<button
+								type="button"
+								className="more"
+								onClick={() => {
+									const next: Baseline = { savedAt: new Date().toISOString(), ids };
+									localStorage.setItem(baselineKey(target), JSON.stringify(next));
+									setBaseline(next);
+								}}
+							>
+								Save baseline
+							</button>
+						</div>
+					) : null}
 				</div>
 			</div>
 
@@ -251,7 +323,7 @@ export default function HealthReport({
 						<thead>
 							<tr>
 								<th>Status</th>
-								<th>Category</th>
+								<th>List / check</th>
 								<th>Host</th>
 								<th>Result</th>
 								<th></th>
@@ -265,7 +337,7 @@ export default function HealthReport({
 											{p.tone === 'error' ? 'error' : 'warn'}
 										</span>
 									</td>
-									<td>{p.tool}</td>
+									<td>{p.label}</td>
 									<td className="value">{p.host}</td>
 									<td>
 										{p.result}

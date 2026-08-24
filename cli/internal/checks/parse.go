@@ -8,16 +8,19 @@ import (
 
 var ToolIDs = map[string]bool{
 	"auto": true, "full": true, "a": true, "aaaa": true, "cname": true, "mx": true, "ns": true,
-	"ptr": true, "soa": true, "txt": true, "spf": true, "dmarc": true, "dkim": true,
+	"ptr": true, "soa": true, "txt": true, "spf": true, "spf-flat": true, "flatten": true, "dmarc": true, "dkim": true,
 	"bimi": true, "mta-sts": true, "tlsrpt": true, "blacklist": true, "blocklist": true,
 	"dns": true, "whois": true, "arin": true, "asn": true, "http": true, "https": true,
-	"tcp": true, "smtp": true, "ping": true, "trace": true,
+	"tcp": true, "smtp": true, "ping": true, "trace": true, "headers": true,
 }
 
 func ParseQuery(raw string) (ParsedQuery, error) {
 	input := strings.TrimSpace(raw)
 	if input == "" {
 		return ParsedQuery{}, fmt.Errorf("empty query")
+	}
+	if strings.EqualFold(input, "headers") {
+		return ParsedQuery{Tool: "headers", Target: "-"}, nil
 	}
 	if i := strings.IndexByte(input, ':'); i > 0 && i < 16 {
 		tool := strings.ToLower(strings.TrimSpace(input[:i]))
@@ -26,13 +29,16 @@ func ParseQuery(raw string) (ParsedQuery, error) {
 			if tool == "blocklist" {
 				tool = "blacklist"
 			}
+			if tool == "flatten" {
+				tool = "spf-flat"
+			}
 			if tool == "dkim" {
 				parts := strings.SplitN(rest, ":", 2)
 				if len(parts) == 2 {
 					return ParsedQuery{Tool: tool, Extra: parts[0], Target: parts[1]}, nil
 				}
 			}
-			if tool == "tcp" {
+			if tool == "tcp" || tool == "smtp" {
 				host, port, err := net.SplitHostPort(rest)
 				if err == nil {
 					return ParsedQuery{Tool: tool, Target: host, Extra: port}, nil

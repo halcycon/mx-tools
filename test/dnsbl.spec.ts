@@ -16,6 +16,13 @@ describe('DNSBL codes', () => {
 		expect(r.label).toContain('SBL');
 	});
 
+	it('treats 127.0.0.4 as XBL listing, not a query error', () => {
+		const r = interpretDnsblCodes('zen.spamhaus.org', ['127.0.0.4']);
+		expect(r.kind).toBe('listed');
+		expect(r.label).toContain('XBL');
+		expect(r.detail.toLowerCase()).toContain('not a query error');
+	});
+
 	it('uses DQS zone when a key is present', () => {
 		expect(spamhausZone('abc123').zone).toBe('abc123.zen.dq.spamhaus.net');
 		expect(spamhausZone('').zone).toBe('zen.spamhaus.org');

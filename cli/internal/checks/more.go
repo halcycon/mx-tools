@@ -1,11 +1,14 @@
 package checks
 
 import (
+	"bufio"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -42,21 +45,43 @@ var DNSBLs = []struct {
 
 func RunBlacklist(target string) Result {
 	start := time.Now()
-	ips := resolveIPs(target)
-	if len(ips) == 0 {
-		return Base("blacklist", "Blacklist Check", target, []Row{{Status: StatusError, Name: "Resolve", Value: "No IPs"}}, "Cannot resolve", start, false)
+	var web []string
+	var mx []struct {
+		host string
+		ips  []string
 	}
-	var v4 []string
-	for _, ip := range ips {
-		if net.ParseIP(ip).To4() != nil {
-			v4 = append(v4, ip)
+	if net.ParseIP(target) != nil {
+		web = []string{target}
+	} else {
+		web = resolveIPs(target)
+		ans, _ := lookup(target, dns.TypeMX)
+		type mxPref struct {
+			pref uint16
+			host string
+		}
+		var hosts []mxPref
+		for _, rr := range ans {
+			if m, ok := rr.(*dns.MX); ok {
+				h := strings.TrimSuffix(m.Mx, ".")
+				if h != "" && h != "." {
+					hosts = append(hosts, mxPref{pref: m.Preference, host: h})
+				}
+			}
+		}
+		sort.Slice(hosts, func(i, j int) bool { return hosts[i].pref < hosts[j].pref })
+		if len(hosts) > 3 {
+			hosts = hosts[:3]
+		}
+		for _, h := range hosts {
+			mx = append(mx, struct {
+				host string
+				ips  []string
+			}{host: h.host, ips: resolveIPs(h.host)})
 		}
 	}
-	if len(v4) == 0 {
-		v4 = ips
-	}
-	if len(v4) > 3 {
-		v4 = v4[:3]
+	check, skipped := selectBlacklistIPs(web, mx)
+	if len(check) == 0 && len(skipped) == 0 {
+		return Base("blacklist", "Blacklist Check", target, []Row{{Status: StatusError, Name: "Resolve", Value: "No IPs"}}, "Cannot resolve", start, false)
 	}
 
 	lists := make([]struct{ Zone, Name string }, len(DNSBLs))
@@ -70,10 +95,30 @@ func RunBlacklist(target string) Result {
 	}
 
 	var rows []Row
+	if len(check) > 0 {
+		parts := make([]string, 0, len(check))
+		for _, a := range check {
+			parts = append(parts, a.ip+" ("+a.role+")")
+		}
+		info := ""
+		if len(mx) > 0 {
+			info = "Mail reputation uses MX host IPs. Website A records that are Cloudflare proxies are skipped."
+		}
+		rows = append(rows, Row{Status: StatusInfo, Name: "Checking", Value: strings.Join(parts, ", "), Info: info})
+	}
+	for _, a := range skipped {
+		rows = append(rows, Row{
+			Status: StatusWarn,
+			Name:   "Cloudflare proxy (" + a.ip + ")",
+			Value:  "Skipped DNSBL (CDN edge)",
+			Info:   "Cloudflare orange-cloud / anycast proxy — website CDN edge, not the mail origin or the process making the query. DNSBLs run against MX IPs instead.",
+		})
+	}
+
 	listed := 0
 	queryErrors := 0
-	for _, ip := range v4 {
-		rev := reverseIPv4(ip)
+	for _, addr := range check {
+		rev := reverseIPv4(addr.ip)
 		if rev == "" {
 			continue
 		}
@@ -96,7 +141,12 @@ func RunBlacklist(target string) Result {
 			if interp.Kind == DnsblQueryError {
 				queryErrors++
 			}
-			rows = append(rows, Row{Status: interp.Status, Name: fmt.Sprintf("%s (%s)", bl.Name, ip), Value: interp.Label, Info: interp.Detail})
+			rows = append(rows, Row{
+				Status: interp.Status,
+				Name:   fmt.Sprintf("%s (%s)", bl.Name, addr.ip),
+				Value:  interp.Label,
+				Info:   addr.role + ". " + interp.Detail,
+			})
 		}
 	}
 	sum := fmt.Sprintf("Clean on %d lists", len(lists))
@@ -247,47 +297,181 @@ func RunTCP(host, portStr string) Result {
 	return Base("tcp", "TCP Check", addr, []Row{{Status: StatusOK, Name: "Connect", Value: "Open " + addr}}, "Open", start, true)
 }
 
-func RunSMTP(target string) Result {
-	start := time.Now()
-	host := target
-	if h, p, err := net.SplitHostPort(target); err == nil {
-		host = h
-		_ = p
-	}
-	// Prefer MX if domain
-	mxHost := host
-	if net.ParseIP(host) == nil {
-		ans, err := lookup(host, dns.TypeMX)
-		if err == nil {
-			var best string
-			var pref uint16 = 65535
-			for _, rr := range ans {
-				if m, ok := rr.(*dns.MX); ok && m.Preference <= pref {
-					pref = m.Preference
-					best = strings.TrimSuffix(m.Mx, ".")
-				}
-			}
-			if best != "" {
-				mxHost = best
-			}
+func smtpReadReply(r *bufio.Reader) (int, string, error) {
+	var lines []string
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return 0, strings.Join(lines, "\n"), err
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if len(line) < 4 {
+			continue
+		}
+		code, err := strconv.Atoi(line[:3])
+		if err != nil {
+			continue
+		}
+		lines = append(lines, strings.TrimSpace(line[4:]))
+		if line[3] == ' ' {
+			return code, strings.Join(lines, "\n"), nil
 		}
 	}
-	addr := net.JoinHostPort(mxHost, "25")
-	conn, err := net.DialTimeout("tcp", addr, 8*time.Second)
+}
+
+func ehloHas(text, token string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.EqualFold(strings.TrimSpace(line), token) {
+			return true
+		}
+	}
+	return false
+}
+
+func ehloAuth(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		u := strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToUpper(u), "AUTH ") {
+			return u[5:]
+		}
+	}
+	return ""
+}
+
+func probeSMTPPort(host string, port int, implicitTLS bool, tryStartTLS bool) Row {
+	name := fmt.Sprintf("TCP %d", port)
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	dialer := net.Dialer{Timeout: 8 * time.Second}
+	var conn net.Conn
+	var err error
+	if implicitTLS {
+		conn, err = tls.DialWithDialer(&dialer, "tcp", addr, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
+	} else {
+		conn, err = dialer.Dial("tcp", addr)
+	}
 	if err != nil {
-		return Base("smtp", "SMTP Test", target, []Row{{Status: StatusFail, Name: "Connect", Value: err.Error(), Info: addr}}, "Failed", start, false)
+		return Row{Status: StatusFail, Name: name, Value: err.Error(), Info: addr}
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(8 * time.Second))
-	buf := make([]byte, 1024)
-	n, _ := conn.Read(buf)
-	banner := strings.TrimSpace(string(buf[:n]))
-	_, _ = conn.Write([]byte("QUIT\r\n"))
-	rows := []Row{
-		{Status: StatusOK, Name: "Host", Value: mxHost},
-		{Status: StatusOK, Name: "Banner", Value: banner},
+	br := bufio.NewReader(conn)
+	code, greet, err := smtpReadReply(br)
+	if err != nil {
+		return Row{Status: StatusFail, Name: name, Value: err.Error(), Info: addr}
 	}
-	return Base("smtp", "SMTP Test", target, rows, banner, start, true)
+	if _, err := fmt.Fprintf(conn, "EHLO dart.invalid\r\n"); err != nil {
+		return Row{Status: StatusFail, Name: name, Value: err.Error()}
+	}
+	_, ehlo, err := smtpReadReply(br)
+	if err != nil {
+		return Row{Status: StatusWarn, Name: name, Value: fmt.Sprintf("%d banner, EHLO failed", code), Info: greet}
+	}
+	mode := "SMTP"
+	if implicitTLS {
+		mode = "SMTPS"
+	}
+	if tryStartTLS && ehloHas(ehlo, "STARTTLS") {
+		if _, err := fmt.Fprintf(conn, "STARTTLS\r\n"); err == nil {
+			ready, _, rerr := smtpReadReply(br)
+			if rerr == nil && ready == 220 {
+				tlsConn := tls.Client(conn, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
+				if herr := tlsConn.Handshake(); herr != nil {
+					return Row{Status: StatusFail, Name: name, Value: "STARTTLS handshake: " + herr.Error(), Info: addr}
+				}
+				conn = tlsConn
+				_ = conn.SetDeadline(time.Now().Add(8 * time.Second))
+				br = bufio.NewReader(conn)
+				if _, err := fmt.Fprintf(conn, "EHLO dart.invalid\r\n"); err == nil {
+					_, ehlo, _ = smtpReadReply(br)
+				}
+				mode = "STARTTLS"
+			}
+		}
+	} else if tryStartTLS && !ehloHas(ehlo, "STARTTLS") {
+		_, _ = fmt.Fprintf(conn, "QUIT\r\n")
+		return Row{Status: StatusWarn, Name: name, Value: fmt.Sprintf("%d open, no STARTTLS", code), Info: greet}
+	}
+	_, _ = fmt.Fprintf(conn, "QUIT\r\n")
+	info := greet
+	if auth := ehloAuth(ehlo); auth != "" {
+		info += " · AUTH " + auth
+	}
+	if ehloHas(ehlo, "STARTTLS") {
+		info += " · STARTTLS"
+	}
+	st := StatusOK
+	if code >= 400 {
+		st = StatusFail
+	}
+	return Row{Status: st, Name: name, Value: fmt.Sprintf("%d %s", code, mode), Info: info}
+}
+
+func bestMX(host string) string {
+	if net.ParseIP(host) != nil {
+		return host
+	}
+	ans, err := lookup(host, dns.TypeMX)
+	if err != nil {
+		return host
+	}
+	var best string
+	var pref uint16 = 65535
+	for _, rr := range ans {
+		if m, ok := rr.(*dns.MX); ok && m.Preference <= pref {
+			pref = m.Preference
+			best = strings.TrimSuffix(m.Mx, ".")
+		}
+	}
+	if best == "" {
+		return host
+	}
+	return best
+}
+
+func RunSMTP(target, extra string) Result {
+	start := time.Now()
+	host := strings.TrimSuffix(target, ".")
+	rows := []Row{}
+	if extra != "" {
+		port, err := strconv.Atoi(extra)
+		if err != nil || port < 1 || port > 65535 {
+			return Base("smtp", "SMTP Test", target, []Row{{Status: StatusError, Name: "Port", Value: "Invalid"}}, "Bad port", start, false)
+		}
+		h := host
+		if port == 25 {
+			h = bestMX(host)
+			if h != host {
+				rows = append(rows, Row{Status: StatusInfo, Name: "MX", Value: h})
+			}
+		}
+		rows = append(rows, probeSMTPPort(h, port, port == 465, port == 587))
+	} else {
+		mx := bestMX(host)
+		if mx != host {
+			rows = append(rows, Row{Status: StatusInfo, Name: "MX (port 25)", Value: mx})
+		}
+		rows = append(rows, probeSMTPPort(mx, 25, false, false))
+		rows = append(rows, probeSMTPPort(host, 587, false, true))
+		rows = append(rows, probeSMTPPort(host, 465, true, false))
+	}
+	open := 0
+	for _, r := range rows {
+		if r.Status == StatusOK && strings.HasPrefix(r.Name, "TCP ") {
+			open++
+		}
+	}
+	sum := fmt.Sprintf("%d SMTP port(s) answered", open)
+	ok := open > 0
+	if !ok {
+		sum = "No SMTP banner"
+	}
+	r := Base("smtp", "SMTP Test", target, rows, sum, start, ok)
+	r.Related = []Related{
+		{Tool: "mx", Label: "MX " + host, Query: "mx:" + host},
+		{Tool: "tcp", Label: "TCP " + host + ":587", Query: "tcp:" + host + ":587"},
+		{Tool: "tcp", Label: "TCP " + host + ":465", Query: "tcp:" + host + ":465"},
+	}
+	return r
 }
 
 func RunPing(target string) Result {
