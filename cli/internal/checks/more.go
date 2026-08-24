@@ -104,14 +104,21 @@ func RunBlacklist(target string) Result {
 		if len(mx) > 0 {
 			info = "Mail reputation uses MX host IPs. Website A records that are Cloudflare proxies are skipped."
 		}
-		rows = append(rows, Row{Status: StatusInfo, Name: "Checking", Value: strings.Join(parts, ", "), Info: info})
+		if len(skipped) > 0 {
+			skipIps := make([]string, 0, len(skipped))
+			for _, a := range skipped {
+				skipIps = append(skipIps, a.ip)
+			}
+			info = "Also skipped website CDN edge " + strings.Join(skipIps, ", ") + " — orange-cloud anycast, not mail origin."
+		}
+		rows = append(rows, Row{Status: StatusInfo, Name: "DNSBL targets", Value: strings.Join(parts, ", "), Info: info})
 	}
 	for _, a := range skipped {
 		rows = append(rows, Row{
-			Status: StatusWarn,
-			Name:   "Cloudflare proxy (" + a.ip + ")",
-			Value:  "Skipped DNSBL (CDN edge)",
-			Info:   "Cloudflare orange-cloud / anycast proxy — website CDN edge, not the mail origin or the process making the query. DNSBLs run against MX IPs instead.",
+			Status: StatusInfo,
+			Name:   "Website A (" + a.ip + ")",
+			Value:  "Cloudflare CDN — not a DNSBL target",
+			Info:   "Orange-cloud / anycast proxy. DNSBL rows below are MX (mail) IPs, not this address.",
 		})
 	}
 

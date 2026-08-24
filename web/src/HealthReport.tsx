@@ -338,7 +338,7 @@ export default function HealthReport({
 										</span>
 									</td>
 									<td>{p.label}</td>
-									<td className="value">{p.host}</td>
+									<td className="host">{p.host}</td>
 									<td>
 										{p.result}
 										{p.info ? <div className="row-info">{p.info}</div> : null}

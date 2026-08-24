@@ -298,19 +298,21 @@ export async function runBlacklist(target: string, opts: LookupOptions = {}): Pr
 	if (check.length) {
 		rows.push({
 			status: 'info',
-			name: 'Checking',
+			name: 'DNSBL targets',
 			value: check.map((a) => `${a.ip} (${a.role})`).join(', '),
-			info: mx.length
-				? 'Mail reputation uses MX host IPs. Website A records that are Cloudflare proxies are skipped.'
-				: undefined,
+			info: skipped.length
+				? `Also skipped website CDN edge ${skipped.map((a) => a.ip).join(', ')} — orange-cloud anycast, not mail origin.`
+				: mx.length
+					? 'Mail reputation uses MX host IPs.'
+					: undefined,
 		});
 	}
-		for (const a of skipped) {
+	for (const a of skipped) {
 		rows.push({
-			status: 'warn',
-			name: `Cloudflare proxy (${a.ip})`,
-			value: 'Skipped DNSBL (CDN edge)',
-			info: 'Cloudflare orange-cloud / anycast proxy — this is the CDN edge for the website, not the mail origin or the Worker making the query. DNSBLs are run against MX IPs instead.',
+			status: 'info',
+			name: `Website A (${a.ip})`,
+			value: 'Cloudflare CDN — not a DNSBL target',
+			info: 'Orange-cloud / anycast proxy. DNSBL rows below are MX (mail) IPs, not this address.',
 		});
 	}
 
