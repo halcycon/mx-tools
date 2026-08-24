@@ -1,0 +1,39 @@
+name: Build CLI TUI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux]
+        goarch: [amd64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build mx-tools TUI binary
+        working-directory: ./cli
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go mod tidy
+          go build -trimpath -ldflags="-s -w" -o mx .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mx-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ./cli/mx
+

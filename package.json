@@ -1,0 +1,35 @@
+{
+  "name": "mx-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Private integrated diagnostic tool — Cloudflare Worker web UI + Bubble Tea CLI",
+  "scripts": {
+    "dev": "concurrently -k -n web,api -c green,cyan \"vite\" \"wrangler dev\"",
+    "dev:api": "wrangler dev",
+    "dev:web": "vite",
+    "build": "vite build",
+    "deploy": "npm run build && wrangler deploy",
+    "start": "npm run build && wrangler dev",
+    "test": "vitest",
+    "cf-typegen": "wrangler types",
+    "cli:build": "cd cli && go build -o ../bin/mx .",
+    "cli:run": "cd cli && go run ."
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
+    "concurrently": "^9.2.1",
+    "typescript": "^5.5.2",
+    "vite": "^7.3.1",
+    "vitest": "~4.1.0",
+    "wrangler": "^4.125.0"
+  },
+  "dependencies": {
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  }
+}
