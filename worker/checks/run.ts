@@ -1,6 +1,7 @@
 import { answersOf, doh, isIp, resolveHostToIps, reverseIp, stripTxt } from './dns';
+import { interpretDnsblCodes, spamhausZone } from './dnsbl-codes';
 import { DNSBLS } from './dnsbls';
-import type { CheckResult, CheckRow, ParsedQuery, Severity } from './types';
+import type { CheckResult, CheckRow, LookupOptions, ParsedQuery, Severity } from './types';
 
 function timed(): { start: number; done: () => number } {
 	const start = Date.now();
@@ -261,52 +262,66 @@ export async function runMtaSts(target: string): Promise<CheckResult> {
 	return base('mta-sts', 'MTA-STS', target, rows, records[0] ?? 'No MTA-STS', t.done(), records.length > 0);
 }
 
-export async function runBlacklist(target: string): Promise<CheckResult> {
+export async function runBlacklist(target: string, opts: LookupOptions = {}): Promise<CheckResult> {
 	const t = timed();
 	const ips = await resolveHostToIps(target);
 	if (!ips.length) {
 		return base('blacklist', 'Blacklist Check', target, [{ status: 'error', name: 'Resolve', value: 'No IPs' }], 'Cannot resolve', t.done(), false);
 	}
 
+	const lists = DNSBLS.map((bl) => (bl.zone.includes('spamhaus') ? { ...bl, ...spamhausZone(opts.spamhausDqsKey) } : bl));
+
 	const rows: CheckRow[] = [];
 	let listed = 0;
+	let queryErrors = 0;
 	// Prefer IPv4 for classic DNSBLs
 	const checkIps = ips.filter((ip) => !ip.includes(':')).length ? ips.filter((ip) => !ip.includes(':')) : ips;
 
 	for (const ip of checkIps.slice(0, 3)) {
 		const rev = reverseIp(ip);
 		if (!rev) continue;
-		// Avoid blasting too many DNSBLs in parallel.
 		const chunkSize = 8;
-		for (let i = 0; i < DNSBLS.length; i += chunkSize) {
-			const chunk = DNSBLS.slice(i, i + chunkSize);
+		for (let i = 0; i < lists.length; i += chunkSize) {
+			const chunk = lists.slice(i, i + chunkSize);
 			const results = await Promise.all(
 				chunk.map(async (bl) => {
 					const q = `${rev}.${bl.zone}`;
 					try {
 						const resp = await doh(q, 'A');
-						const hit = answersOf(resp, 'A').length > 0;
-						return { bl, ip, hit, data: answersOf(resp, 'A').map((a) => a.data).join(', ') };
+						return { bl, ip, answers: answersOf(resp, 'A').map((a) => a.data) };
 					} catch {
-						return { bl, ip, hit: false, data: '' };
+						return { bl, ip, answers: [] as string[] };
 					}
 				}),
 			);
 			for (const r of results) {
-				if (r.hit) listed++;
 				const isWl = r.bl.zone.includes('dnswl');
+				const interp = interpretDnsblCodes(r.bl.zone, r.answers, isWl);
+				if (interp.kind === 'listed') listed++;
+				if (interp.kind === 'query_error') queryErrors++;
 				rows.push({
-					status: r.hit ? (isWl ? 'ok' : 'fail') : 'ok',
+					status: interp.status,
 					name: `${r.bl.name} (${ip})`,
-					value: r.hit ? (isWl ? `Listed (good) ${r.data}` : `LISTED ${r.data}`) : 'OK',
-					info: r.bl.url,
+					value: interp.label,
+					info: interp.detail + (r.bl.url ? ` ${r.bl.url}` : ''),
 				});
 			}
 		}
 	}
 
-	const summary = listed ? `Listed on ${listed} list(s)` : `Clean on ${DNSBLS.length} lists`;
-	return base('blacklist', 'Blacklist Check', target, rows, summary, t.done(), listed === 0);
+	const summary = listed
+		? `Listed on ${listed} list(s)`
+		: queryErrors
+			? `No listings; ${queryErrors} list(s) returned query errors (e.g. Spamhaus anonymous/open-resolver)`
+			: `Clean on ${lists.length} lists`;
+	return {
+		...base('blacklist', 'Blacklist Check', target, rows, summary, t.done(), listed === 0),
+		meta: {
+			listed,
+			queryErrors,
+			spamhausDqs: Boolean(opts.spamhausDqsKey?.trim()),
+		},
+	};
 }
 
 export async function runDnsHealth(target: string): Promise<CheckResult> {
@@ -527,19 +542,19 @@ export async function runTrace(target: string): Promise<CheckResult> {
 
 type NamedJob = { name: string; run: () => Promise<CheckResult> };
 
-function autoJobs(target: string): NamedJob[] {
+function autoJobs(target: string, opts: LookupOptions = {}): NamedJob[] {
 	return [
 		{ name: 'mx', run: () => runMx(target) },
 		{ name: 'spf', run: () => runSpf(target) },
 		{ name: 'dmarc', run: () => runDmarc(target) },
-		{ name: 'blacklist', run: () => runBlacklist(target) },
+		{ name: 'blacklist', run: () => runBlacklist(target, opts) },
 		{ name: 'soa', run: () => runSoa(target) },
 	];
 }
 
-function fullJobs(target: string): NamedJob[] {
+function fullJobs(target: string, opts: LookupOptions = {}): NamedJob[] {
 	return [
-		...autoJobs(target),
+		...autoJobs(target, opts),
 		{ name: 'dkim', run: () => runDkim(target, 'default') },
 		{ name: 'txt', run: () => runTxt(target) },
 		{ name: 'ns', run: () => runNs(target) },
@@ -586,37 +601,37 @@ async function* streamPool(jobs: NamedJob[], concurrency = 4): AsyncGenerator<Ch
 	}
 }
 
-export async function runAutoFast(target: string): Promise<CheckResult[]> {
+export async function runAutoFast(target: string, opts: LookupOptions = {}): Promise<CheckResult[]> {
 	const out: CheckResult[] = [];
-	for await (const r of streamPool(autoJobs(target))) out.push(r);
+	for await (const r of streamPool(autoJobs(target, opts))) out.push(r);
 	return out;
 }
 
-export async function runFull(target: string): Promise<CheckResult[]> {
+export async function runFull(target: string, opts: LookupOptions = {}): Promise<CheckResult[]> {
 	const out: CheckResult[] = [];
-	for await (const r of streamPool(fullJobs(target), 4)) out.push(r);
+	for await (const r of streamPool(fullJobs(target, opts), 4)) out.push(r);
 	return out;
 }
 
-export async function* streamOne(q: ParsedQuery): AsyncGenerator<CheckResult> {
+export async function* streamOne(q: ParsedQuery, opts: LookupOptions = {}): AsyncGenerator<CheckResult> {
 	if (q.tool === 'auto') {
-		yield* streamPool(autoJobs(q.target));
+		yield* streamPool(autoJobs(q.target, opts));
 		return;
 	}
 	if (q.tool === 'full') {
-		yield* streamPool(fullJobs(q.target), 4);
+		yield* streamPool(fullJobs(q.target, opts), 4);
 		return;
 	}
-	for (const r of await runOne(q)) yield r;
+	for (const r of await runOne(q, opts)) yield r;
 }
 
-export async function runOne(q: ParsedQuery): Promise<CheckResult[]> {
+export async function runOne(q: ParsedQuery, opts: LookupOptions = {}): Promise<CheckResult[]> {
 	const { tool, target, extra } = q;
 	switch (tool) {
 		case 'auto':
-			return runAutoFast(target);
+			return runAutoFast(target, opts);
 		case 'full':
-			return runFull(target);
+			return runFull(target, opts);
 		case 'a':
 			return [await runA(target)];
 		case 'aaaa':
@@ -646,7 +661,7 @@ export async function runOne(q: ParsedQuery): Promise<CheckResult[]> {
 		case 'tlsrpt':
 			return [await runTlsrpt(target)];
 		case 'blacklist':
-			return [await runBlacklist(target)];
+			return [await runBlacklist(target, opts)];
 		case 'dns':
 			return [await runDnsHealth(target)];
 		case 'whois':

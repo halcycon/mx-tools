@@ -86,6 +86,18 @@ go build -o ../bin/mx .
 
 Requires Go 1.22+. `ping` / `traceroute` shell out to system binaries.
 
+Spamhaus public mirrors return **query errors** (not listings) when asked via open resolvers such as 1.1.1.1 — notably `127.255.255.254`. D.A.R.T. labels those as query errors. For a **private** instance, set a DQS key:
+
+```bash
+# Worker (private deploy)
+npx wrangler secret put SPAMHAUS_DQS_KEY
+
+# CLI
+export SPAMHAUS_DQS_KEY=your-key
+```
+
+The web UI Settings panel can also store a key in **this browser only** and send it as `x-spamhaus-dqs-key`. Do not paste keys into a public deployment.
+
 ## Query syntax
 
 Command prefixes with `tool:target` (optional extra segments for tools like DKIM):

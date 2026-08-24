@@ -92,5 +92,8 @@ Examples:
   mx blacklist:127.0.0.2
   mx dkim:google:gmail.com
   mx tcp:example.com:443
-  mx smtp:gmail.com`)
+  mx smtp:gmail.com
+
+Spamhaus DQS (private):
+  export SPAMHAUS_DQS_KEY=...`)
 }

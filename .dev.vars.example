@@ -1,0 +1,5 @@
+# Local Worker secrets (copy to .dev.vars — never commit .dev.vars)
+
+# Spamhaus Data Query Service key for private blacklist lookups.
+# wrangler secret put SPAMHAUS_DQS_KEY
+SPAMHAUS_DQS_KEY=

@@ -1,5 +1,7 @@
-import { parseQuery, TOOLS, type CheckResult } from './checks/types';
+import { parseQuery, TOOLS, type CheckResult, type LookupOptions } from './checks/types';
 import { plannedChecks, runOne, streamOne } from './checks/run';
+
+type WorkerEnv = Env & { SPAMHAUS_DQS_KEY?: string };
 
 function json(data: unknown, status = 200): Response {
 	return new Response(JSON.stringify(data, null, 2), {
@@ -21,16 +23,28 @@ function sseHeaders(): HeadersInit {
 	};
 }
 
-async function handleLookup(request: Request, url: URL): Promise<Response> {
+function lookupOptions(request: Request, env: WorkerEnv, bodyKey?: string): LookupOptions {
+	const header = request.headers.get('x-spamhaus-dqs-key')?.trim();
+	return { spamhausDqsKey: header || bodyKey?.trim() || env.SPAMHAUS_DQS_KEY?.trim() };
+}
+
+async function handleLookup(request: Request, url: URL, env: WorkerEnv): Promise<Response> {
 	let raw = url.searchParams.get('q') ?? url.searchParams.get('query') ?? '';
+	let bodyKey: string | undefined;
 	if (request.method === 'POST') {
 		try {
-			const body = (await request.json()) as { q?: string; query?: string };
+			const body = (await request.json()) as {
+				q?: string;
+				query?: string;
+				keys?: { spamhausDqs?: string };
+			};
 			raw = body.q ?? body.query ?? raw;
+			bodyKey = body.keys?.spamhausDqs;
 		} catch {
 			/* keep query param */
 		}
 	}
+	const opts = lookupOptions(request, env, bodyKey);
 	if (!raw.trim()) return json({ error: 'Missing q' }, 400);
 	if (raw.length > 512) return json({ error: 'Query too long' }, 400);
 	if (/[\x00-\x1F\x7F]/.test(raw)) return json({ error: 'Invalid characters in query' }, 400);
@@ -65,7 +79,7 @@ async function handleLookup(request: Request, url: URL): Promise<Response> {
 					checks: planned,
 				});
 				let count = 0;
-				for await (const r of streamOne(parsed)) {
+				for await (const r of streamOne(parsed, opts)) {
 					count += 1;
 					await send('result', r);
 				}
@@ -81,7 +95,7 @@ async function handleLookup(request: Request, url: URL): Promise<Response> {
 	}
 
 	try {
-		const results: CheckResult[] = await runOne(parsed);
+		const results: CheckResult[] = await runOne(parsed, opts);
 		return json({ query: raw, ...parsed, results });
 	} catch (e) {
 		return json({ error: e instanceof Error ? e.message : String(e) }, 500);
@@ -91,13 +105,14 @@ async function handleLookup(request: Request, url: URL): Promise<Response> {
 export default {
 	async fetch(request, env): Promise<Response> {
 		const url = new URL(request.url);
+		const bindings = env as WorkerEnv;
 
 		if (request.method === 'OPTIONS') {
 			return new Response(null, {
 				headers: {
 					'access-control-allow-origin': '*',
 					'access-control-allow-methods': 'GET, POST, OPTIONS',
-					'access-control-allow-headers': 'content-type, accept',
+					'access-control-allow-headers': 'content-type, accept, x-spamhaus-dqs-key',
 				},
 			});
 		}
@@ -106,8 +121,14 @@ export default {
 			return json({ tools: TOOLS });
 		}
 
+		if (url.pathname === '/api/config') {
+			return json({
+				spamhausDqsConfigured: Boolean(bindings.SPAMHAUS_DQS_KEY?.trim()),
+			});
+		}
+
 		if (url.pathname === '/api/lookup' || url.pathname === '/api/supertool') {
-			return handleLookup(request, url);
+			return handleLookup(request, url, bindings);
 		}
 
 		if (url.pathname === '/api/health') {

@@ -59,41 +59,51 @@ func RunBlacklist(target string) Result {
 		v4 = v4[:3]
 	}
 
+	lists := make([]struct{ Zone, Name string }, len(DNSBLs))
+	copy(lists, DNSBLs)
+	sz, sn := SpamhausZone()
+	for i := range lists {
+		if strings.Contains(lists[i].Zone, "spamhaus") {
+			lists[i].Zone = sz
+			lists[i].Name = sn
+		}
+	}
+
 	var rows []Row
 	listed := 0
+	queryErrors := 0
 	for _, ip := range v4 {
 		rev := reverseIPv4(ip)
 		if rev == "" {
 			continue
 		}
-		for _, bl := range DNSBLs {
+		for _, bl := range lists {
 			q := rev + "." + bl.Zone
 			ans, err := lookup(q, dns.TypeA)
-			hit := err == nil && len(ans) > 0
-			isWL := strings.Contains(bl.Zone, "dnswl")
-			st := StatusOK
-			val := "OK"
-			if hit {
-				var data []string
+			var answers []string
+			if err == nil {
 				for _, rr := range ans {
 					if a, ok := rr.(*dns.A); ok {
-						data = append(data, a.A.String())
+						answers = append(answers, a.A.String())
 					}
 				}
-				if isWL {
-					val = "Listed (good) " + strings.Join(data, ",")
-				} else {
-					listed++
-					st = StatusFail
-					val = "LISTED " + strings.Join(data, ",")
-				}
 			}
-			rows = append(rows, Row{Status: st, Name: fmt.Sprintf("%s (%s)", bl.Name, ip), Value: val})
+			isWL := strings.Contains(bl.Zone, "dnswl")
+			interp := InterpretDnsbl(bl.Zone, answers, isWL)
+			if interp.Kind == DnsblListed {
+				listed++
+			}
+			if interp.Kind == DnsblQueryError {
+				queryErrors++
+			}
+			rows = append(rows, Row{Status: interp.Status, Name: fmt.Sprintf("%s (%s)", bl.Name, ip), Value: interp.Label, Info: interp.Detail})
 		}
 	}
-	sum := fmt.Sprintf("Clean on %d lists", len(DNSBLs))
+	sum := fmt.Sprintf("Clean on %d lists", len(lists))
 	if listed > 0 {
 		sum = fmt.Sprintf("Listed on %d list(s)", listed)
+	} else if queryErrors > 0 {
+		sum = fmt.Sprintf("No listings; %d list(s) returned query errors", queryErrors)
 	}
 	return Base("blacklist", "Blacklist Check", target, rows, sum, start, listed == 0)
 }

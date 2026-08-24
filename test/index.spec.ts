@@ -29,4 +29,11 @@ describe('mx-tools API', () => {
 		expect(plannedChecks('auto', 'example.com')).toEqual(['mx', 'spf', 'dmarc', 'blacklist', 'soa']);
 		expect(plannedChecks('full', 'example.com').length).toBe(16);
 	});
+
+	it('/api/config does not leak secrets', async () => {
+		const res = await SELF.fetch('http://example.com/api/config');
+		const body = await res.json<Record<string, unknown>>();
+		expect(body.spamhausDqsConfigured).toBe(false);
+		expect(body).not.toHaveProperty('SPAMHAUS_DQS_KEY');
+	});
 });

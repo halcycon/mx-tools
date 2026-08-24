@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import HealthReport from './HealthReport';
-import type { CheckResult, Severity } from './types';
+import Settings, { loadKeys } from './Settings';
+import type { CheckResult } from './types';
 
 type ToolDef = {
 	id: string;
@@ -82,6 +83,14 @@ export default function App() {
 	const [expected, setExpected] = useState(0);
 	const [report, setReport] = useState(false);
 	const [activeQuery, setActiveQuery] = useState('');
+	const [settingsOpen, setSettingsOpen] = useState(false);
+	const [serverHasDqs, setServerHasDqs] = useState(false);
+	const [detail, setDetail] = useState<{ query: string; results: CheckResult[]; loading: boolean } | null>(null);
+	const [reportSnap, setReportSnap] = useState<{
+		query: string;
+		results: CheckResult[];
+		expected: number;
+	} | null>(null);
 
 	useEffect(() => {
 		void (async () => {
@@ -91,6 +100,18 @@ export default function App() {
 				setTools(d.tools ?? []);
 			} catch {
 				setTools([]);
+			}
+		})();
+	}, []);
+
+	useEffect(() => {
+		void (async () => {
+			try {
+				const r = await fetch('/api/config');
+				const d = (await r.json()) as { spamhausDqsConfigured?: boolean };
+				setServerHasDqs(Boolean(d.spamhausDqsConfigured));
+			} catch {
+				setServerHasDqs(false);
 			}
 		})();
 	}, []);
@@ -106,6 +127,41 @@ export default function App() {
 		return list.filter((t) => t.id !== 'ping' && t.id !== 'trace');
 	}, [tools]);
 
+	const consumeStream = useCallback(async (q: string, onEvent: (event: string, parsed: Record<string, unknown>) => void) => {
+		const key = loadKeys().spamhausDqs.trim();
+		const res = await fetch(`/api/lookup?stream=1&q=${encodeURIComponent(q)}`, {
+			headers: {
+				Accept: 'text/event-stream',
+				...(key ? { 'x-spamhaus-dqs-key': key } : {}),
+			},
+		});
+		if (!res.ok || !res.body) {
+			const text = await res.text();
+			throw new Error(text || `HTTP ${res.status}`);
+		}
+		const reader = res.body.getReader();
+		const dec = new TextDecoder();
+		let buf = '';
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			buf += dec.decode(value, { stream: true });
+			const chunks = buf.split('\n\n');
+			buf = chunks.pop() ?? '';
+			for (const chunk of chunks) {
+				const lines = chunk.split('\n');
+				let event = 'message';
+				let data = '';
+				for (const line of lines) {
+					if (line.startsWith('event:')) event = line.slice(6).trim();
+					if (line.startsWith('data:')) data += line.slice(5).trim();
+				}
+				if (!data) continue;
+				onEvent(event, JSON.parse(data) as Record<string, unknown>);
+			}
+		}
+	}, []);
+
 	const buildQuery = useCallback(
 		(override?: string) => {
 			if (override) return override;
@@ -118,9 +174,31 @@ export default function App() {
 	);
 
 	const run = useCallback(
-		async (raw?: string) => {
+		async (raw?: string, mode: 'main' | 'detail' = 'main') => {
 			const q = buildQuery(raw);
 			if (!q) return;
+
+			if (mode === 'detail') {
+				setDetail({ query: q, results: [], loading: true });
+				try {
+					await consumeStream(q, (event, parsed) => {
+						if (event === 'result') {
+							setDetail((d) =>
+								d ? { ...d, results: [...d.results, parsed as unknown as CheckResult] } : d,
+							);
+						}
+						if (event === 'error') setError(String(parsed.message ?? 'Lookup failed'));
+					});
+				} catch (e) {
+					setError(e instanceof Error ? e.message : String(e));
+				} finally {
+					setDetail((d) => (d ? { ...d, loading: false } : d));
+				}
+				return;
+			}
+
+			setDetail(null);
+			setReportSnap(null);
 			setLoading(true);
 			setError(null);
 			setResults([]);
@@ -135,48 +213,34 @@ export default function App() {
 			setHistory((h) => [q, ...h.filter((x) => x !== q)].slice(0, 30));
 
 			try {
-				const res = await fetch(`/api/lookup?stream=1&q=${encodeURIComponent(q)}`, {
-					headers: { Accept: 'text/event-stream' },
-				});
-				if (!res.ok || !res.body) {
-					const text = await res.text();
-					throw new Error(text || `HTTP ${res.status}`);
-				}
-				const reader = res.body.getReader();
-				const dec = new TextDecoder();
-				let buf = '';
-				while (true) {
-					const { done, value } = await reader.read();
-					if (done) break;
-					buf += dec.decode(value, { stream: true });
-					const chunks = buf.split('\n\n');
-					buf = chunks.pop() ?? '';
-					for (const chunk of chunks) {
-						const lines = chunk.split('\n');
-						let event = 'message';
-						let data = '';
-						for (const line of lines) {
-							if (line.startsWith('event:')) event = line.slice(6).trim();
-							if (line.startsWith('data:')) data += line.slice(5).trim();
-						}
-						if (!data) continue;
-						const parsed = JSON.parse(data);
-						if (event === 'start') {
-							const n = Number(parsed.expected) || 0;
-							setExpected(n);
-							setReport(parsed.tool === 'auto' || parsed.tool === 'full' || n > 1);
-						}
-						if (event === 'result') setResults((r) => [...r, parsed as CheckResult]);
-						if (event === 'error') setError(parsed.message ?? 'Lookup failed');
+				await consumeStream(q, (event, parsed) => {
+					if (event === 'start') {
+						const n = Number(parsed.expected) || 0;
+						setExpected(n);
+						setReport(parsed.tool === 'auto' || parsed.tool === 'full' || n > 1);
 					}
-				}
+					if (event === 'result') setResults((r) => [...r, parsed as unknown as CheckResult]);
+					if (event === 'error') setError(String(parsed.message ?? 'Lookup failed'));
+				});
 			} catch (e) {
 				setError(e instanceof Error ? e.message : String(e));
 			} finally {
 				setLoading(false);
 			}
 		},
-		[buildQuery, tool],
+		[buildQuery, consumeStream, tool],
+	);
+
+	const openDetail = useCallback(
+		(q: string) => {
+			setReportSnap({
+				query: activeQuery,
+				results,
+				expected,
+			});
+			void run(q, 'detail');
+		},
+		[activeQuery, expected, results, run],
 	);
 
 	const onSubmit = (e: FormEvent) => {
@@ -211,6 +275,9 @@ export default function App() {
 				<h1>
 					mx<span>-tools</span>
 				</h1>
+				<button type="button" className="settings-btn" onClick={() => setSettingsOpen(true)}>
+					Settings
+				</button>
 			</div>
 			<p className="tagline">
 				D.A.R.T. (Domain Authentication & Reputation Toolkit) for DNS, mail auth, blacklists, and network
@@ -285,19 +352,44 @@ export default function App() {
 
 				<section className="panel results">
 					{error && <p className="empty" style={{ color: 'var(--fail)' }}>{error}</p>}
-					{!error && results.length === 0 && !loading && (
+					{detail ? (
+						<>
+							<button
+								type="button"
+								className="back-btn"
+								onClick={() => {
+									if (reportSnap) {
+										setActiveQuery(reportSnap.query);
+										setResults(reportSnap.results);
+										setExpected(reportSnap.expected);
+										setReport(true);
+									}
+									setDetail(null);
+									setError(null);
+								}}
+							>
+								← Back to health report
+							</button>
+							<p className="detail-query">
+								<code>{detail.query}</code>
+								{detail.loading ? ' — running…' : null}
+							</p>
+							{detail.results.map((r, i) => (
+								<ResultCard key={`${r.tool}-${i}`} result={r} onRelated={(q) => void run(q, 'detail')} />
+							))}
+						</>
+					) : !error && results.length === 0 && !loading ? (
 						<p className="empty">
 							Enter a domain and run <strong>Email health report</strong>, or try <code>full:example.com</code>
 						</p>
-					)}
-					{(report || expected > 1) && (loading || results.length > 0) ? (
+					) : (report || expected > 1) && (loading || results.length > 0) ? (
 						<HealthReport
 							query={activeQuery}
 							target={activeQuery.includes(':') ? activeQuery.slice(activeQuery.indexOf(':') + 1) : activeQuery}
 							results={results}
 							expected={expected || results.length}
 							loading={loading}
-							onOpen={(q) => void run(q)}
+							onOpen={openDetail}
 						/>
 					) : (
 						results.map((r, i) => <ResultCard key={`${r.tool}-${i}`} result={r} onRelated={(q) => void run(q)} />)
@@ -309,6 +401,7 @@ export default function App() {
 				CLI: <code>mx example.com</code> · <code>mx blacklist:1.2.3.4</code> · SMTP/ping/traceroute work best in
 				the TUI (Workers block ICMP and port 25).
 			</p>
+			<Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} serverHasDqs={serverHasDqs} />
 		</div>
 	);
 }

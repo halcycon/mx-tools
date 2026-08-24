@@ -28,6 +28,11 @@ export type ParsedQuery = {
 	extra?: string;
 };
 
+export type LookupOptions = {
+	/** Spamhaus Data Query Service key — private deploys only */
+	spamhausDqsKey?: string;
+};
+
 export type ToolDef = {
 	id: string;
 	label: string;
