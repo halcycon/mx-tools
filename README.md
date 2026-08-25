@@ -107,6 +107,23 @@ export SPAMHAUS_DQS_KEY=your-key
 
 The web UI Settings panel can also store a key in **this browser only** and send it as `x-spamhaus-dqs-key`. Do not paste keys into a public deployment.
 
+### Local probe agent (recommended for DNSBL)
+
+Spamhaus (and some other lists) reject queries that arrive via public/open resolvers such as Cloudflare DoH. Run the CLI as a small HTTP agent on your laptop or mail network so lookups use **local DNS / egress**:
+
+```bash
+cd cli && go build -o ../bin/mx .
+# token printed if omitted; or:
+export MX_AGENT_TOKEN=$(openssl rand -hex 24)
+# optional DQS — stays on this host, never uploaded to the Worker
+export SPAMHAUS_DQS_KEY=your-key
+../bin/mx agent --listen 127.0.0.1:8788 --token "$MX_AGENT_TOKEN"
+```
+
+In the web UI: **Settings → Probe agent** → URL `http://127.0.0.1:8788` + token → **Test connection** → Save. Lookups then hit the agent (SSE-compatible `/api/lookup`). Bind non-loopback only with `--allow-lan`.
+
+From an `https://` hosted UI, some browsers block `http://127.0.0.1` (mixed content). Prefer `npm start` locally, or `ssh -L 8788:127.0.0.1:8788 user@mailhost` and point Settings at loopback.
+
 ## Query syntax
 
 Command prefixes with `tool:target` (optional extra segments for tools like DKIM):
@@ -129,7 +146,7 @@ full:example.com
 ```
 worker/          Cloudflare Worker API + check engine (TypeScript)
 web/             React + Vite D.A.R.T. UI
-cli/             Go Bubble Tea TUI + local check engine
+cli/             Go Bubble Tea TUI + local check engine + `mx agent`
 dist/            Built static assets (gitignored)
 ```
 

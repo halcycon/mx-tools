@@ -167,7 +167,8 @@ export const GUIDE_TOOLS: GuideTool[] = [
 	{
 		id: 'blacklist',
 		label: 'Blacklist',
-		blurb: 'Multi-DNSBL check. For domains, prefers MX IPs; Cloudflare orange-cloud website A records are skipped when MX exists.',
+		blurb:
+			'Multi-DNSBL check (MX IPs preferred). On the Worker, Spamhaus often returns open-resolver query errors — connect Settings → Probe agent (`mx agent`) for local DNS, or use a DQS key on a private instance.',
 		example: 'blacklist:1.2.3.4',
 		group: 'reputation',
 		web: true,

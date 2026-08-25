@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import HealthReport from './HealthReport';
-import Settings, { loadKeys } from './Settings';
+import Settings, { agentBase, agentHeaders, loadKeys, probeAgent } from './Settings';
 import ToolGuide from './ToolGuide';
 import type { CheckResult } from './types';
 import { analyzeHeaders } from '@engine/headers';
@@ -89,6 +89,8 @@ export default function App() {
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const [guideOpen, setGuideOpen] = useState(false);
 	const [serverHasDqs, setServerHasDqs] = useState(false);
+	const [agentStatus, setAgentStatus] = useState<'off' | 'ok' | 'bad'>('off');
+	const [agentLabel, setAgentLabel] = useState('');
 	const [headerRaw, setHeaderRaw] = useState('');
 	const [detail, setDetail] = useState<{ query: string; results: CheckResult[]; loading: boolean } | null>(null);
 	const [reportSnap, setReportSnap] = useState<{
@@ -97,8 +99,28 @@ export default function App() {
 		expected: number;
 	} | null>(null);
 
-	useEffect(() => {
+	const refreshBackend = useCallback(() => {
 		void (async () => {
+			const keys = loadKeys();
+			const base = agentBase(keys);
+			if (base) {
+				const r = await probeAgent(keys.agentUrl, keys.agentToken);
+				setAgentStatus(r.ok ? 'ok' : 'bad');
+				setAgentLabel(r.ok ? r.message : r.message);
+				if (r.ok) {
+					try {
+						const toolsRes = await fetch(`${base}/api/tools`, { headers: agentHeaders(keys) });
+						const d = (await toolsRes.json()) as { tools?: ToolDef[] };
+						setTools(d.tools ?? []);
+					} catch {
+						/* keep existing tools */
+					}
+					return;
+				}
+			} else {
+				setAgentStatus('off');
+				setAgentLabel('');
+			}
 			try {
 				const r = await fetch('/api/tools');
 				const d = (await r.json()) as { tools?: ToolDef[] };
@@ -106,11 +128,6 @@ export default function App() {
 			} catch {
 				setTools([]);
 			}
-		})();
-	}, []);
-
-	useEffect(() => {
-		void (async () => {
 			try {
 				const r = await fetch('/api/config');
 				const d = (await r.json()) as { spamhausDqsConfigured?: boolean };
@@ -120,6 +137,10 @@ export default function App() {
 			}
 		})();
 	}, []);
+
+	useEffect(() => {
+		refreshBackend();
+	}, [refreshBackend]);
 
 	useEffect(() => {
 		localStorage.setItem('mx-tools-history', JSON.stringify(history.slice(0, 30)));
@@ -138,8 +159,9 @@ export default function App() {
 		const list = tools.length
 			? tools
 			: [{ id: 'auto', label: 'Domain health', description: '', example: '' }];
+		if (agentStatus === 'ok') return list;
 		return list.filter((t) => t.id !== 'ping' && t.id !== 'trace');
-	}, [tools]);
+	}, [tools, agentStatus]);
 
 	const selectedMeta = useMemo(() => {
 		const fromApi = toolOptions.find((t) => t.id === tool);
@@ -152,13 +174,16 @@ export default function App() {
 	}, [tool, toolOptions]);
 
 	const consumeStream = useCallback(async (q: string, onEvent: (event: string, parsed: Record<string, unknown>) => void) => {
-		const key = loadKeys().spamhausDqs.trim();
-		const res = await fetch(`/api/lookup?stream=1&q=${encodeURIComponent(q)}`, {
-			headers: {
-				Accept: 'text/event-stream',
-				...(key ? { 'x-spamhaus-dqs-key': key } : {}),
-			},
-		});
+		const keys = loadKeys();
+		const base = agentBase(keys);
+		const url = base
+			? `${base}/api/lookup?stream=1&q=${encodeURIComponent(q)}`
+			: `/api/lookup?stream=1&q=${encodeURIComponent(q)}`;
+		const headers: Record<string, string> = {
+			Accept: 'text/event-stream',
+			...(base ? agentHeaders(keys) : keys.spamhausDqs.trim() ? { 'x-spamhaus-dqs-key': keys.spamhausDqs.trim() } : {}),
+		};
+		const res = await fetch(url, { headers });
 		if (!res.ok || !res.body) {
 			const text = await res.text();
 			throw new Error(text || `HTTP ${res.status}`);
@@ -342,6 +367,16 @@ export default function App() {
 					mx<span>-tools</span>
 				</h1>
 				<div className="brand-actions">
+					{agentStatus !== 'off' ? (
+						<button
+							type="button"
+							className={`agent-pill ${agentStatus}`}
+							onClick={() => setSettingsOpen(true)}
+							title={agentLabel || 'Probe agent'}
+						>
+							{agentStatus === 'ok' ? 'Agent connected' : 'Agent unreachable'}
+						</button>
+					) : null}
 					<button type="button" className="settings-btn" onClick={() => setGuideOpen(true)}>
 						Tools guide
 					</button>
@@ -529,10 +564,16 @@ export default function App() {
 			</div>
 
 			<p className="footer">
-				CLI: <code>mx example.com</code> · <code>mx full:example.com</code> · <code>mx blacklist:1.2.3.4</code> ·
-				SMTP/ping/traceroute: TUI preferred (Workers block ICMP and outbound port 25; 587/465 work here).
+				CLI: <code>mx example.com</code> · <code>mx agent</code> (local probe for the UI) ·{' '}
+				<code>mx full:example.com</code> · SMTP/ping: agent or TUI (Workers block ICMP and outbound port 25;
+				587/465 work on the Worker).
 			</p>
-			<Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} serverHasDqs={serverHasDqs} />
+			<Settings
+				open={settingsOpen}
+				onClose={() => setSettingsOpen(false)}
+				serverHasDqs={serverHasDqs}
+				onSaved={refreshBackend}
+			/>
 			{guideOpen ? (
 				<div className="guide-backdrop" role="dialog" aria-modal="true" aria-label="Tools guide">
 					<div className="guide-sheet panel">

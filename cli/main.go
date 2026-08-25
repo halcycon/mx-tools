@@ -8,12 +8,21 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"mxtools/internal/agent"
 	"mxtools/internal/checks"
 	"mxtools/internal/tui"
 )
 
 func main() {
 	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "agent" {
+		if err := runAgent(args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	jsonOut := false
 	oneshot := false
 	filtered := make([]string, 0, len(args))
@@ -75,6 +84,65 @@ func main() {
 	}
 }
 
+func runAgent(args []string) error {
+	cfg := agent.Config{Listen: "127.0.0.1:8788"}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "-h" || a == "--help":
+			printAgentHelp()
+			return nil
+		case a == "--allow-lan":
+			cfg.AllowLAN = true
+		case a == "--listen" && i+1 < len(args):
+			i++
+			cfg.Listen = args[i]
+		case strings.HasPrefix(a, "--listen="):
+			cfg.Listen = strings.TrimPrefix(a, "--listen=")
+		case a == "--token" && i+1 < len(args):
+			i++
+			cfg.Token = args[i]
+		case strings.HasPrefix(a, "--token="):
+			cfg.Token = strings.TrimPrefix(a, "--token=")
+		default:
+			return fmt.Errorf("unknown agent flag: %s\n\nrun: mx agent --help", a)
+		}
+	}
+	if env := strings.TrimSpace(os.Getenv("MX_AGENT_TOKEN")); cfg.Token == "" && env != "" {
+		cfg.Token = env
+	}
+	return agent.Run(cfg)
+}
+
+func printAgentHelp() {
+	fmt.Println(`mx agent — local probe HTTP server for the D.A.R.T. web UI
+
+Runs the same checks as the CLI on this machine (local DNS, SMTP :25, ping).
+Point the web UI Settings → Probe agent at the listen URL + token.
+
+Usage:
+  mx agent [--listen 127.0.0.1:8788] [--token SECRET] [--allow-lan]
+
+Flags:
+  --listen ADDR   Bind address (default 127.0.0.1:8788)
+  --token SECRET  Bearer token (or MX_AGENT_TOKEN). Auto-generated if omitted.
+  --allow-lan     Required to bind a non-loopback address
+
+Env:
+  MX_AGENT_TOKEN      Same as --token
+  SPAMHAUS_DQS_KEY    Optional DQS key for Spamhaus (stays on this host)
+
+Examples:
+  mx agent
+  mx agent --token "$(openssl rand -hex 24)"
+  export SPAMHAUS_DQS_KEY=... MX_AGENT_TOKEN=...
+  mx agent --listen 0.0.0.0:8788 --allow-lan
+
+Web UI: Settings → Probe agent URL http://127.0.0.1:8788 + paste token.
+From an https:// hosted UI, some browsers block http://127.0.0.1 (mixed content);
+use local wrangler/vite, or SSH tunnel + loopback.`)
+}
+
 func printHelp() {
 	fmt.Println(`mx-tools CLI — private D.A.R.T.
 
@@ -83,6 +151,7 @@ Usage:
   mx example.com      TUI prefilled / auto-run
   mx --once mx:a.com  One-shot text output
   mx --json spf-flat:a.com JSON output
+  mx agent            Local probe server for the web UI
 
 Commands (prefix:target):
   auto full
@@ -100,8 +169,10 @@ Examples:
   mx dkim:google:gmail.com
   mx tcp:example.com:443
   mx smtp:smtp.gmail.com
-  mx smtp:example.com:587
+  mx agent --token secret
 
 Spamhaus DQS (private):
-  export SPAMHAUS_DQS_KEY=...`)
+  export SPAMHAUS_DQS_KEY=...
+
+See also: mx agent --help`)
 }
