@@ -142,19 +142,40 @@ function uniq(list: string[]): string[] {
 	return [...new Set(list)];
 }
 
+export type SpfFlatten = {
+	lookups: number;
+	ips: string[];
+	kept: string[];
+	notes: CheckRow[];
+	/** Effective `all` qualifier after redirects (`?all` when none is published). */
+	all: string;
+	found: boolean;
+};
+
+export async function flattenSpf(target: string): Promise<SpfFlatten> {
+	const domain = target.replace(/\.$/, '');
+	const state: FlattenState = { lookups: 0, ips: [], kept: [], notes: [], seen: new Set() };
+	const allQual = await flattenDomain(domain, state, 0);
+	return {
+		lookups: state.lookups,
+		ips: uniq(state.ips),
+		kept: uniq(state.kept),
+		notes: state.notes,
+		all: allQual ?? '?all',
+		found: allQual !== null,
+	};
+}
+
 export async function runSpfFlat(target: string): Promise<CheckResult> {
 	const start = Date.now();
 	const domain = target.replace(/\.$/, '');
-	const state: FlattenState = { lookups: 0, ips: [], kept: [], notes: [], seen: new Set() };
-	const allQual = (await flattenDomain(domain, state, 0)) ?? '?all';
-	const ips = uniq(state.ips);
-	const kept = uniq(state.kept);
+	const { lookups, ips, kept, notes, all: allQual } = await flattenSpf(domain);
 	const flat = ['v=spf1', ...ips, ...kept, allQual].join(' ');
 	const rows: CheckRow[] = [
 		{
-			status: (state.lookups > 10 ? 'fail' : state.lookups > 7 ? 'warn' : 'ok') as Severity,
+			status: (lookups > 10 ? 'fail' : lookups > 7 ? 'warn' : 'ok') as Severity,
 			name: 'DNS lookups (orig.)',
-			value: String(state.lookups),
+			value: String(lookups),
 			info: 'RFC 7208 limit is 10 mechanisms that cause DNS lookups',
 		},
 		{
@@ -170,13 +191,13 @@ export async function runSpfFlat(target: string): Promise<CheckResult> {
 		},
 		{ status: 'ok', name: 'Flattened SPF', value: flat },
 	];
-	rows.push(...state.notes);
+	rows.push(...notes);
 	return {
 		tool: 'spf-flat',
 		title: 'SPF Flattening',
 		query: domain,
-		ok: state.lookups <= 10 && Boolean(ips.length || kept.length),
-		summary: state.lookups > 10 ? `Over lookup budget (${state.lookups}/10)` : `Flattened ${ips.length} CIDR/IP term(s), ${state.lookups} orig. lookups`,
+		ok: lookups <= 10 && Boolean(ips.length || kept.length),
+		summary: lookups > 10 ? `Over lookup budget (${lookups}/10)` : `Flattened ${ips.length} CIDR/IP term(s), ${lookups} orig. lookups`,
 		rows,
 		related: [
 			{ tool: 'spf', label: 'Original SPF', query: `spf:${domain}` },

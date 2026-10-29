@@ -1,8 +1,9 @@
 import { parseQuery, TOOLS, type CheckResult, type LookupOptions } from './checks/types';
 import { analyzeHeaders, HEADER_MAX_BYTES } from './checks/headers';
 import { plannedChecks, runOne, streamOne } from './checks/run';
+import { handleHealthCheck, HEALTH_CHECK_PATH, type HealthEnv } from './health/handler';
 
-type WorkerEnv = Env & { SPAMHAUS_DQS_KEY?: string };
+type WorkerEnv = Env & HealthEnv;
 
 function json(data: unknown, status = 200): Response {
 	return new Response(JSON.stringify(data, null, 2), {
@@ -104,9 +105,13 @@ async function handleLookup(request: Request, url: URL, env: WorkerEnv): Promise
 }
 
 export default {
-	async fetch(request, env): Promise<Response> {
+	async fetch(request, env, ctx): Promise<Response> {
 		const url = new URL(request.url);
 		const bindings = env as WorkerEnv;
+
+		if (url.pathname === HEALTH_CHECK_PATH) {
+			return handleHealthCheck(request, bindings, ctx);
+		}
 
 		if (request.method === 'OPTIONS') {
 			return new Response(null, {

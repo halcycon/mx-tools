@@ -10,6 +10,20 @@
 		"binding": "ASSETS",
 		"run_worker_first": ["/api/*"]
 	},
+	"vars": {
+		// "true" also allows http://localhost:1313 (Hugo dev) to call /api/v1/health-check
+		"HEALTH_CHECK_ALLOW_DEV_ORIGINS": "false"
+	},
+	"ratelimits": [
+		{
+			// Per hashed client IP, per Cloudflare location (approximate). Period must be 10 or 60.
+			"name": "HEALTH_CHECK_RATE_LIMITER",
+			"namespace_id": "4101",
+			"simple": { "limit": 3, "period": 60 }
+		}
+	],
+	"routes": [{ "pattern": "dart.thecuckoocamp.co.uk", "custom_domain": true }],
+	"workers_dev": true,
 	"preview_urls": true,
 	"observability": {
 		"enabled": true
