@@ -259,6 +259,8 @@ The full report's `checks[]` uses the same shape, adding `smtp` and `ptr` after 
 
 ### Full-report setup
 
+Every Worker secret and variable, with its exact value and source, is listed in [docs/worker-secrets.md](docs/worker-secrets.md).
+
 ```bash
 npx wrangler d1 migrations apply mx-tools-reports --remote   # npm run db:migrate
 npx wrangler secret put TURNSTILE_SECRET
