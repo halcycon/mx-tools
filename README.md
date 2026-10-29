@@ -146,7 +146,7 @@ npx wrangler secret put TURNSTILE_SECRET     # Turnstile widget secret key
 #   TURNSTILE_SECRET=1x0000000000000000000000000000000AA
 ```
 
-Custom domain: Workers → mx-tools → Settings → Domains & Routes → add `dart.thecuckoocamp.co.uk`. The Cache API only works on custom domains.
+Custom domain: `dart.thecuckoocamp.co.uk` is declared in `wrangler.jsonc` (`custom_domain: true`), so deploys create it. The Cache API only works on custom domains.
 
 ### Health-check codes
 
