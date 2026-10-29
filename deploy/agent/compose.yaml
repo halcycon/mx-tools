@@ -1,0 +1,63 @@
+# D.A.R.T. probe agent stack for the VPS (Docker Compose / Arcane).
+#
+#   agent        mx agent: DNSBL (with Spamhaus DQS), SMTP 25/587/465 + certificates, PTR/FCrDNS
+#   unbound      local recursive resolver, so DNSBL queries come from this server's IP
+#   cloudflared  Cloudflare Tunnel: publishes the agent (no open ports on the VPS)
+#
+# Secrets come from the project's .env (Arcane: Environment Configuration). See .env.example.
+# Nothing is published on host ports; cloudflared reaches the agent over the internal network.
+
+name: mx-agent
+
+services:
+  agent:
+    image: ghcr.io/halcycon/mx-tools-agent:${AGENT_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    command: ["agent", "--listen", "0.0.0.0:8788", "--allow-lan", "--resolver", "unbound:53"]
+    environment:
+      MX_AGENT_TOKEN: ${MX_AGENT_TOKEN:?set MX_AGENT_TOKEN in .env}
+      MX_AGENT_HMAC_SECRET: ${MX_AGENT_HMAC_SECRET:?set MX_AGENT_HMAC_SECRET in .env (same value as the Worker's AGENT_HMAC_SECRET)}
+      SPAMHAUS_DQS_KEY: ${SPAMHAUS_DQS_KEY:-}
+    depends_on:
+      unbound:
+        condition: service_healthy
+    networks: [mx]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/mx", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  unbound:
+    image: docker.io/klutchell/unbound:${UNBOUND_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    networks: [mx]
+    healthcheck:
+      test: ["CMD", "drill-hc", "@127.0.0.1", "dnssec.works"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging: *logging
+
+  cloudflared:
+    image: docker.io/cloudflare/cloudflared:${CLOUDFLARED_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env}
+    depends_on:
+      agent:
+        condition: service_healthy
+    networks: [mx]
+    logging: *logging
+
+networks:
+  mx: {}

@@ -91,6 +91,20 @@ func Run(cfg Config) error {
 	return srv.ListenAndServe()
 }
 
+// Healthcheck exits non-zero unless the agent answers /api/health (used by Docker; the image has no shell).
+func Healthcheck(url string) error {
+	client := &http.Client{Timeout: 3 * time.Second}
+	res, err := client.Get(url)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("health: HTTP %d", res.StatusCode)
+	}
+	return nil
+}
+
 type server struct {
 	token      string
 	hmacSecret string

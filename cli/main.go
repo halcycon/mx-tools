@@ -22,6 +22,17 @@ func main() {
 		}
 		return
 	}
+	if len(args) > 0 && args[0] == "healthcheck" {
+		url := "http://127.0.0.1:8788/api/health"
+		if len(args) > 1 {
+			url = args[1]
+		}
+		if err := agent.Healthcheck(url); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	jsonOut := false
 	oneshot := false
@@ -164,6 +175,7 @@ Usage:
   mx --once mx:a.com  One-shot text output
   mx --json spf-flat:a.com JSON output
   mx agent            Local probe server for the web UI
+  mx healthcheck [URL] Exit 0 if an agent answers /api/health (Docker healthcheck)
 
 Commands (prefix:target):
   auto full
