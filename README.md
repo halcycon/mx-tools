@@ -272,17 +272,7 @@ npx wrangler secret put AGENT_CLIENT_SECRET
 
 `REPORT_FROM` must be on an Email Sending domain (`thecuckoocamp.co.uk` is onboarded). The `EMAIL` binding only allows that sender.
 
-**VPS agent (Hetzner).**
-
-```bash
-# Local recursive resolver so DNSBL queries come from the VPS IP, not a shared resolver
-sudo apt install unbound
-export SPAMHAUS_DQS_KEY=…            # stays on the VPS
-export MX_AGENT_HMAC_SECRET=$(openssl rand -hex 32)
-./mx agent --listen 127.0.0.1:8788 --resolver 127.0.0.1 --token "$(openssl rand -hex 24)"
-# cloudflared tunnel: dart-agent.thecuckoocamp.co.uk → http://127.0.0.1:8788,
-# protected by an Access application with a Service Auth policy for the Worker's service token.
-```
+**VPS agent (Hetzner).** Deploy the Docker stack in [`deploy/agent/`](deploy/agent/README.md): the agent, a local `unbound` resolver and `cloudflared`, importable into Arcane straight from this repo. That README covers the Tunnel and Access setup and the matching Worker secrets.
 
 - With `MX_AGENT_HMAC_SECRET` set, `/api/v1/probe` only accepts HMAC-signed requests: `x-mx-timestamp` plus `x-mx-signature` = HMAC-SHA256 of `ts\nPOST\n/api/v1/probe\nsha256(body)`. Signatures older than ±5 min or already used are rejected.
 - The agent only dials public IPs, so a hostile MX record can't point it at the VPS's own network.
@@ -351,6 +341,7 @@ full:example.com
 ## Layout
 
 ```
+deploy/agent/    Docker stack for the VPS probe agent (Arcane / docker compose)
 worker/          Cloudflare Worker API + check engine (TypeScript)
 web/             React + Vite D.A.R.T. UI
 cli/             Go Bubble Tea TUI + local check engine + `mx agent`

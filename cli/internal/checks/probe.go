@@ -141,7 +141,10 @@ func mxHosts(domain string, max int) []ProbeMXHost {
 	return out
 }
 
-// ProbeBlacklist queries every DNSBL for the domain's MX (and non-CDN web) IPs.
+// Defunct lists that SERVFAIL for every query; probing them would make every report inconclusive.
+var probeSkipZones = map[string]bool{"db.wpbl.info": true}
+
+// ProbeBlacklist queries every live DNSBL for the domain's MX (and non-CDN web) IPs.
 func ProbeBlacklist(domain string, mx []ProbeMXHost) ProbeDNSBL {
 	var web []string
 	for _, ip := range resolveIPs(domain) {
@@ -162,6 +165,9 @@ func ProbeBlacklist(domain string, mx []ProbeMXHost) ProbeDNSBL {
 	type list struct{ zone, query, name string }
 	lists := make([]list, 0, len(DNSBLs))
 	for _, bl := range DNSBLs {
+		if probeSkipZones[bl.Zone] {
+			continue
+		}
 		if strings.Contains(bl.Zone, "spamhaus") {
 			lists = append(lists, list{zone: bl.Zone, query: sz, name: sn})
 		} else {
@@ -214,6 +220,30 @@ func ProbeBlacklist(domain string, mx []ProbeMXHost) ProbeDNSBL {
 	return res
 }
 
+// resolveIPsStrict is resolveIPs that also reports a failed A or AAAA lookup.
+func resolveIPsStrict(host string) ([]string, error) {
+	var out []string
+	var firstErr error
+	for _, qt := range []uint16{dns.TypeA, dns.TypeAAAA} {
+		ans, err := lookup(host, qt)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		for _, rr := range ans {
+			switch v := rr.(type) {
+			case *dns.A:
+				out = append(out, v.A.String())
+			case *dns.AAAA:
+				out = append(out, v.AAAA.String())
+			}
+		}
+	}
+	return out, firstErr
+}
+
 func reverseName(ip string) string {
 	name, err := dns.ReverseAddr(ip)
 	if err != nil {
@@ -253,13 +283,19 @@ func ProbePTRs(mx []ProbeMXHost, max int) []ProbePTR {
 					p.PTR = append(p.PTR, strings.TrimSuffix(ptr.Ptr, "."))
 				}
 			}
+			forwardFailed := false
 			for _, host := range p.PTR {
-				for _, ip := range resolveIPs(host) {
+				ips, err := resolveIPsStrict(host)
+				forwardFailed = forwardFailed || err != nil
+				for _, ip := range ips {
 					p.Forward = append(p.Forward, ip)
 					if net.ParseIP(ip).Equal(net.ParseIP(a.IP)) {
 						p.FCrDNS = true
 					}
 				}
+			}
+			if !p.FCrDNS && forwardFailed {
+				p.Error = "forward lookup failed"
 			}
 			out[i] = p
 		}(i, a)

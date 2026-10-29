@@ -46,6 +46,10 @@ func exchange(name string, qtype uint16) (*dns.Msg, error) {
 	m.SetQuestion(dns.Fqdn(name), qtype)
 	m.RecursionDesired = true
 	r, _, err := c.Exchange(m, resolverAddr)
+	if err != nil {
+		// One retry: a cold recursive cache can time out on the first deep lookup.
+		r, _, err = c.Exchange(m, resolverAddr)
+	}
 	if err == nil && r.Truncated {
 		c.Net = "tcp"
 		r, _, err = c.Exchange(m, resolverAddr)
