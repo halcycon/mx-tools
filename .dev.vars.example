@@ -3,3 +3,11 @@
 # Spamhaus Data Query Service key for private blacklist lookups.
 # wrangler secret put SPAMHAUS_DQS_KEY
 SPAMHAUS_DQS_KEY=
+
+# Turnstile secret for POST /api/v1/health-check.
+# wrangler secret put TURNSTILE_SECRET
+# Local dev: Cloudflare's always-pass test secret.
+TURNSTILE_SECRET=1x0000000000000000000000000000000AA
+
+# Allow http://localhost:1313 (Hugo dev) to call /api/v1/health-check.
+HEALTH_CHECK_ALLOW_DEV_ORIGINS=true

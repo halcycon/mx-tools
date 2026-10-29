@@ -1,9 +1,9 @@
 import { answersOf, doh, isIp, resolveHostToIps, reverseIp, stripTxt } from './dns';
-import { interpretDnsblCodes, spamhausZone } from './dnsbl-codes';
+import { interpretDnsblCodes, spamhausZone, type DnsblInterpretation } from './dnsbl-codes';
 import { DNSBLS } from './dnsbls';
 import { runSpfFlat } from './spf-flat';
 import { runSmtp } from './smtp';
-import { selectBlacklistIps } from './cloudflare-ips';
+import { selectBlacklistIps, type BlacklistAddr } from './cloudflare-ips';
 import type { CheckResult, CheckRow, LookupOptions, ParsedQuery, Severity } from './types';
 
 function timed(): { start: number; done: () => number } {
@@ -234,7 +234,7 @@ export async function runTlsrpt(target: string): Promise<CheckResult> {
 	return base('tlsrpt', 'TLSRPT Record', target, rows, records[0] ?? 'No TLSRPT', t.done(), records.length > 0);
 }
 
-export async function runMtaSts(target: string): Promise<CheckResult> {
+export async function runMtaSts(target: string, timeoutMs?: number): Promise<CheckResult> {
 	const t = timed();
 	const domain = target.replace(/\.$/, '');
 	const dnsName = `_mta-sts.${domain}`;
@@ -248,7 +248,7 @@ export async function runMtaSts(target: string): Promise<CheckResult> {
 	}
 	try {
 		const policyUrl = `https://mta-sts.${domain}/.well-known/mta-sts.txt`;
-		const res = await fetch(policyUrl, { redirect: 'follow' });
+		const res = await fetch(policyUrl, { redirect: 'follow', signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined });
 		const text = await res.text();
 		rows.push({
 			status: res.ok ? 'ok' : 'warn',
@@ -267,8 +267,58 @@ export async function runMtaSts(target: string): Promise<CheckResult> {
 	return base('mta-sts', 'MTA-STS', target, rows, records[0] ?? 'No MTA-STS', t.done(), records.length > 0);
 }
 
-export async function runBlacklist(target: string, opts: LookupOptions = {}): Promise<CheckResult> {
-	const t = timed();
+export type DnsblHit = {
+	list: string;
+	url?: string;
+	ip: string;
+	role: string;
+	answers: string[];
+	/** DoH request itself failed or timed out (reported as clean in the UI rows). */
+	lookupFailed: boolean;
+	/** DNS RCODE from DoH (0 NOERROR, 2 SERVFAIL, 3 NXDOMAIN); null when the lookup failed. */
+	rcode: number | null;
+	interp: DnsblInterpretation;
+};
+
+export type BlacklistScanOptions = {
+	/** Zones to leave out, e.g. lists that always refuse public resolvers. */
+	skipZones?: ReadonlySet<string>;
+	/** Per-query deadline; a timed-out query is reported as `lookupFailed`. */
+	queryTimeoutMs?: number;
+	concurrency?: number;
+};
+
+function withTimeout<T>(p: Promise<T>, ms: number | undefined): Promise<T> {
+	if (!ms) return p;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const deadline = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new Error('timeout')), ms);
+	});
+	return Promise.race([p, deadline]).finally(() => clearTimeout(timer));
+}
+
+async function mapPool<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+	const out = new Array<R>(items.length);
+	let next = 0;
+	const worker = async () => {
+		while (next < items.length) {
+			const i = next++;
+			out[i] = await fn(items[i]);
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+	return out;
+}
+
+export type BlacklistScan = {
+	mx: Array<{ host: string; ips: string[] }>;
+	check: BlacklistAddr[];
+	skipped: BlacklistAddr[];
+	listCount: number;
+	hits: DnsblHit[];
+};
+
+export async function scanBlacklist(target: string, opts: LookupOptions = {}, scanOpts: BlacklistScanOptions = {}): Promise<BlacklistScan> {
 	let web: string[] = [];
 	let mx: Array<{ host: string; ips: string[] }> = [];
 	if (isIp(target)) {
@@ -290,6 +340,42 @@ export async function runBlacklist(target: string, opts: LookupOptions = {}): Pr
 	}
 
 	const { check, skipped } = selectBlacklistIps(web, mx);
+	const lists = DNSBLS.filter((bl) => !scanOpts.skipZones?.has(bl.zone)).map((bl) =>
+		bl.zone.includes('spamhaus') ? { ...bl, ...spamhausZone(opts.spamhausDqsKey) } : bl,
+	);
+	const tasks = check.flatMap((addr) => {
+		const rev = reverseIp(addr.ip);
+		return rev ? lists.map((bl) => ({ addr, rev, bl })) : [];
+	});
+
+	const hits = await mapPool(tasks, scanOpts.concurrency ?? 8, async ({ addr, rev, bl }): Promise<DnsblHit> => {
+		let answers: string[] = [];
+		let lookupFailed = false;
+		let rcode: number | null = null;
+		try {
+			const resp = await withTimeout(doh(`${rev}.${bl.zone}`, 'A'), scanOpts.queryTimeoutMs);
+			answers = answersOf(resp, 'A').map((a) => a.data);
+			rcode = resp.Status;
+		} catch {
+			lookupFailed = true;
+		}
+		return {
+			list: bl.name,
+			url: bl.url,
+			ip: addr.ip,
+			role: addr.role,
+			answers,
+			lookupFailed,
+			rcode,
+			interp: interpretDnsblCodes(bl.zone, answers, bl.zone.includes('dnswl')),
+		};
+	});
+	return { mx, check, skipped, listCount: lists.length, hits };
+}
+
+export async function runBlacklist(target: string, opts: LookupOptions = {}): Promise<CheckResult> {
+	const t = timed();
+	const { mx, check, skipped, listCount, hits } = await scanBlacklist(target, opts);
 	if (!check.length && !skipped.length) {
 		return base('blacklist', 'Blacklist Check', target, [{ status: 'error', name: 'Resolve', value: 'No IPs' }], 'Cannot resolve', t.done(), false);
 	}
@@ -316,48 +402,24 @@ export async function runBlacklist(target: string, opts: LookupOptions = {}): Pr
 		});
 	}
 
-	const lists = DNSBLS.map((bl) => (bl.zone.includes('spamhaus') ? { ...bl, ...spamhausZone(opts.spamhausDqsKey) } : bl));
-
 	let listed = 0;
 	let queryErrors = 0;
-
-	for (const addr of check) {
-		const rev = reverseIp(addr.ip);
-		if (!rev) continue;
-		const chunkSize = 8;
-		for (let i = 0; i < lists.length; i += chunkSize) {
-			const chunk = lists.slice(i, i + chunkSize);
-			const results = await Promise.all(
-				chunk.map(async (bl) => {
-					const q = `${rev}.${bl.zone}`;
-					try {
-						const resp = await doh(q, 'A');
-						return { bl, answers: answersOf(resp, 'A').map((a) => a.data) };
-					} catch {
-						return { bl, answers: [] as string[] };
-					}
-				}),
-			);
-			for (const r of results) {
-				const isWl = r.bl.zone.includes('dnswl');
-				const interp = interpretDnsblCodes(r.bl.zone, r.answers, isWl);
-				if (interp.kind === 'listed') listed++;
-				if (interp.kind === 'query_error') queryErrors++;
-				rows.push({
-					status: interp.status,
-					name: `${r.bl.name} (${addr.ip})`,
-					value: interp.label,
-					info: `${addr.role}. ${interp.detail}${r.bl.url ? ` ${r.bl.url}` : ''}`,
-				});
-			}
-		}
+	for (const h of hits) {
+		if (h.interp.kind === 'listed') listed++;
+		if (h.interp.kind === 'query_error') queryErrors++;
+		rows.push({
+			status: h.interp.status,
+			name: `${h.list} (${h.ip})`,
+			value: h.interp.label,
+			info: `${h.role}. ${h.interp.detail}${h.url ? ` ${h.url}` : ''}`,
+		});
 	}
 
 	const summary = listed
 		? `Listed on ${listed} list(s)`
 		: queryErrors
 			? `No listings; ${queryErrors} list(s) returned query errors (e.g. Spamhaus anonymous/open-resolver)`
-			: `Clean on ${lists.length} lists`;
+			: `Clean on ${listCount} lists`;
 	return {
 		...base('blacklist', 'Blacklist Check', target, rows, summary, t.done(), listed === 0),
 		meta: {
@@ -488,14 +550,18 @@ export async function runAsn(target: string): Promise<CheckResult> {
 	}
 }
 
-export async function runHttp(target: string, secure: boolean): Promise<CheckResult> {
+export async function runHttp(target: string, secure: boolean, timeoutMs?: number): Promise<CheckResult> {
 	const t = timed();
 	const tool = secure ? 'https' : 'http';
 	let url = target;
 	if (!/^https?:\/\//i.test(url)) url = `${secure ? 'https' : 'http'}://${url}`;
 	try {
 		const started = Date.now();
-		const res = await fetch(url, { redirect: 'manual', headers: { 'User-Agent': 'mx-tools/1.0' } });
+		const res = await fetch(url, {
+			redirect: 'manual',
+			headers: { 'User-Agent': 'mx-tools/1.0' },
+			signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
+		});
 		const ms = Date.now() - started;
 		const rows: CheckRow[] = [
 			{ status: res.ok || (res.status >= 300 && res.status < 400) ? 'ok' : 'warn', name: 'Status', value: String(res.status) },
