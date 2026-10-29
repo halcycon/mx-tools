@@ -60,12 +60,12 @@ export function mapSmtp(probe: AgentProbe | null, now: number): Mapped {
 	const facts = { egress, probes };
 	const technical = probes.map(smtpLine).join('\n');
 
-	if (egress && mx.length && !mx.some((p) => p.connected)) return { code: 'smtp_unreachable', facts, technical };
 	if (connected.some((p) => p.cert && p.cert.daysLeft < 0)) return { code: 'cert_expired', facts, technical };
 	if (mx.some((p) => p.connected && !p.startTls)) return { code: 'smtp_starttls_missing', facts, technical };
+	if (connected.some((p) => p.cert && !p.cert.verified)) return { code: 'cert_invalid', facts, technical };
 	if (connected.some((p) => (p.startTls || p.port === 465) && !p.tls)) return { code: 'smtp_tls_failed', facts, technical };
-	if (connected.some((p) => p.cert && !p.cert.verified)) return { code: 'smtp_cert_invalid', facts, technical };
 	if (connected.some((p) => p.cert && p.cert.daysLeft < CERT_EXPIRY_WARN_DAYS)) return { code: 'cert_expiring_soon', facts, technical };
+	if (egress && mx.length && !mx.some((p) => p.connected)) return { code: 'smtp_unreachable', facts, technical };
 	if (!mx.length) {
 		const reason = egress === false ? 'egress_blocked' : (probe.dnsbl.mx ?? []).length ? 'no_public_mx_ip' : 'no_mx';
 		return { code: 'smtp_not_checked', facts: { ...facts, reason }, technical };

@@ -77,16 +77,16 @@ export const CODE_STATUS = {
 	https_ok: 'pass',
 
 	// Full (gated) report only — need the VPS agent.
-	smtp_unreachable: 'fail',
 	cert_expired: 'fail',
-	smtp_starttls_missing: 'warn',
+	smtp_starttls_missing: 'fail',
+	cert_invalid: 'fail',
 	smtp_tls_failed: 'warn',
-	smtp_cert_invalid: 'warn',
 	cert_expiring_soon: 'warn',
+	smtp_unreachable: 'info',
 	smtp_not_checked: 'info',
 	smtp_ok: 'pass',
 
-	ptr_missing: 'warn',
+	ptr_missing: 'fail',
 	ptr_mismatch: 'warn',
 	ptr_not_checked: 'info',
 	ptr_ok: 'pass',

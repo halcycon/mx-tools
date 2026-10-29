@@ -72,7 +72,7 @@ describe('SMTP mapping', () => {
 		const cert = smtp().cert!;
 		expect(code(probe({ smtp: [smtp({ cert: { ...cert, notAfter: inDays(-1) } })] }))).toBe('cert_expired');
 		expect(code(probe({ smtp: [smtp({ cert: { ...cert, notAfter: inDays(10) } })] }))).toBe('cert_expiring_soon');
-		expect(code(probe({ smtp: [smtp({ cert: { ...cert, verified: false, verifyError: 'x509: unknown authority' } })] }))).toBe('smtp_cert_invalid');
+		expect(code(probe({ smtp: [smtp({ cert: { ...cert, verified: false, verifyError: 'x509: unknown authority' } })] }))).toBe('cert_invalid');
 		const sub = smtp({ host: 'smtp.example.org', port: 465, mode: 'implicit', role: 'submission', cert: { ...cert, notAfter: inDays(5) } });
 		const m = mapSmtp(probe({ smtp: [smtp(), sub] }), NOW);
 		expect(m.code).toBe('cert_expiring_soon');
@@ -89,8 +89,17 @@ describe('PTR mapping', () => {
 		expect(mapPtr([{ ...a, ptr: ['host.isp.net'], forward: ['198.51.100.1'], fcrdns: false }], 'agent').code).toBe('ptr_mismatch');
 		expect(mapPtr([{ ...a, ptr: ['mx.example.org'], forward: ['192.0.2.10'], fcrdns: true }], 'worker').code).toBe('ptr_ok');
 	});
-	it('new codes have statuses', () => {
-		for (const c of ['smtp_starttls_missing', 'cert_expiring_soon', 'ptr_mismatch', 'smtp_ok', 'ptr_ok']) expect(CODE_STATUS).toHaveProperty(c);
+	it('new codes have the statuses agreed with the website wording', () => {
+		expect(CODE_STATUS).toMatchObject({
+			smtp_unreachable: 'info',
+			smtp_starttls_missing: 'fail',
+			cert_invalid: 'fail',
+			cert_expired: 'fail',
+			cert_expiring_soon: 'warn',
+			ptr_missing: 'fail',
+			ptr_mismatch: 'warn',
+		});
+		expect(CODE_STATUS).not.toHaveProperty('smtp_cert_invalid');
 	});
 });
 

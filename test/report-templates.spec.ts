@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildReport, toCheck } from '../worker/health/codes';
+import { buildReport, CODE_STATUS, toCheck } from '../worker/health/codes';
 import { NO_MAILBOX_LINE, renderApology, renderConfirmation, renderLead, renderReport } from '../worker/report/templates';
 import { describe as describeCheck, WORDING } from '../worker/report/wording';
 
@@ -63,6 +63,27 @@ describe('report email', () => {
 	});
 });
 
+describe('website wording snapshot', () => {
+	const LABEL: Record<string, string[]> = {
+		pass: ['Good'],
+		warn: ['Worth improving'],
+		fail: ['Needs fixing'],
+		info: ["Couldn't check", 'Optional', 'Not used'],
+	};
+
+	it('covers every code the API can return', () => {
+		const missing = Object.keys(CODE_STATUS).filter((c) => !WORDING.codes[c]?.text);
+		expect(missing).toEqual([]);
+	});
+
+	it("labels agree with each code's status", () => {
+		const mismatched = Object.entries(CODE_STATUS)
+			.filter(([c, status]) => WORDING.codes[c]?.label && !LABEL[status].includes(WORDING.codes[c].label!))
+			.map(([c, status]) => `${c}: ${status} vs ${WORDING.codes[c].label}`);
+		expect(mismatched).toEqual([]);
+	});
+});
+
 describe('confirmation, lead and apology emails', () => {
 	it('confirmation carries the single-use link and expiry', () => {
 		const e = renderConfirmation({ name: 'Ann', domain: 'example.org', confirmUrl: 'https://dart.example/api/v1/report-confirm?token=abc', ttlHours: 24 });
@@ -75,7 +96,7 @@ describe('confirmation, lead and apology emails', () => {
 	it('lead has contact details, counts, top issues and the call flag', () => {
 		const e = renderLead({ name: 'Ann', email: 'ann@example.org', organisation: 'Small Charity', domain: 'example.org', wantsCall: true, report, usedCache: false, usedAgent: true });
 		expect(e.subject).toBe('Call request: example.org (fail)');
-		for (const s of ['ann@example.org', 'Small Charity', 'Yes, asked for a call', 'pass 1 · warn 2 · fail 1', 'mx_missing', 'dmarc_policy_none', 'VPS agent']) {
+		for (const s of ['ann@example.org', 'Small Charity', 'Yes, asked for a call', 'pass 1 · warn 1 · fail 2', 'mx_missing', 'dmarc_policy_none', 'VPS agent']) {
 			expect(e.text).toContain(s);
 		}
 	});

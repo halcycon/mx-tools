@@ -242,15 +242,15 @@ Request and confirmation limits are checked again at confirm time, because sever
 
 | Check | Code | Status | Meaning / key `facts` |
 |-------|------|--------|-----------------------|
-| smtp | `smtp_unreachable` | fail | No MX accepted a connection on port 25 |
 | smtp | `cert_expired` | fail | A mail-server certificate (25/587/465) has expired |
-| smtp | `smtp_starttls_missing` | warn | An MX doesn't offer STARTTLS |
+| smtp | `smtp_starttls_missing` | fail | An MX doesn't offer STARTTLS |
+| smtp | `cert_invalid` | fail | Certificate doesn't validate (untrusted chain or wrong hostname). `cert.verifyError` |
 | smtp | `smtp_tls_failed` | warn | STARTTLS / implicit TLS handshake failed |
-| smtp | `smtp_cert_invalid` | warn | Certificate doesn't validate (untrusted chain or wrong hostname). `cert.verifyError` |
 | smtp | `cert_expiring_soon` | warn | A certificate expires within 21 days. `cert.daysLeft` |
+| smtp | `smtp_unreachable` | info | No MX accepted a connection on port 25 from the agent (some networks block test connections) |
 | smtp | `smtp_not_checked` | info | Agent unavailable, port 25 egress blocked, or no MX. `reason` |
 | smtp | `smtp_ok` | pass | `probes[{host, port, role, banner, startTls, tls, tlsVersion, cert}]`, `egress` |
-| ptr | `ptr_missing` | warn | An MX IP has no reverse DNS |
+| ptr | `ptr_missing` | fail | An MX IP has no reverse DNS |
 | ptr | `ptr_mismatch` | warn | Reverse DNS doesn't resolve back to the IP (FCrDNS fails) |
 | ptr | `ptr_not_checked` | info | Lookups failed or no MX IPs. `reason` |
 | ptr | `ptr_ok` | pass | `addresses[{ip, role, ptr, forward, fcrdns}]`, `source` |

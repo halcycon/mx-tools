@@ -97,7 +97,7 @@ describe('full report flow', () => {
 		expect(lead.replyTo).toBe(b.email);
 		expect(lead.subject).toContain('Call request');
 		const row = await getRequest(DB, queued[0].id);
-		expect(row).toMatchObject({ status: 'sent', wants_call: 1, overall: 'warn' });
+		expect(row).toMatchObject({ status: 'sent', wants_call: 1, overall: 'fail' });
 
 		expect(await processReport(e, queued[0].id, Date.now(), fakeRun)).toBe('skipped');
 		expect(sent).toHaveLength(3);
