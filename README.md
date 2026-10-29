@@ -104,7 +104,7 @@ Response `200`:
   "checks": [
     {
       "id": "dmarc",
-      "status": "warn",
+      "status": "fail",
       "code": "dmarc_policy_none",
       "facts": { "record": "v=DMARC1; p=none", "policy": "none", "subdomainPolicy": null, "pct": 100, "rua": null, "ruf": null },
       "technical": "v=DMARC1; p=none"
@@ -163,12 +163,12 @@ Codes are stable. They are only ever added, never renamed. Where several apply, 
 | spf | `spf_pass_hardfail` | pass | Valid and ends `-all`. `record`, `all`, `lookups` |
 | dmarc | `dmarc_missing` | fail | No `_dmarc` record |
 | dmarc | `dmarc_invalid` | fail | Record without a valid `p=` |
-| dmarc | `dmarc_policy_none` | warn | `p=none` (monitoring only) |
+| dmarc | `dmarc_policy_none` | fail | `p=none` (monitoring only) |
 | dmarc | `dmarc_no_rua` | warn | `p=quarantine`/`reject` but no `rua=` aggregate reports. Check `facts.policy` |
-| dmarc | `dmarc_policy_quarantine` | pass | `p=quarantine` with `rua` |
+| dmarc | `dmarc_policy_quarantine` | warn | `p=quarantine` with `rua` |
 | dmarc | `dmarc_policy_reject` | pass | `p=reject` with `rua`. Facts: `policy`, `subdomainPolicy`, `pct`, `rua`, `ruf`, `record` |
 | dkim | `dkim_found` | pass | A key on at least one common selector. `found[{selector, record}]` |
-| dkim | `dkim_not_found_common_selectors` | warn | None of the common selectors has a key (a custom selector may still exist). `selectorsChecked`, `revoked` |
+| dkim | `dkim_not_found_common_selectors` | info | None of the common selectors has a key (a custom selector may still exist). `selectorsChecked`, `revoked` |
 | mx | `mx_missing` | fail | No MX records |
 | mx | `mx_unresolved` | warn | An MX host has no A/AAAA |
 | mx | `mx_null` | info | Null MX (`0 .`): the domain explicitly receives no mail |

@@ -65,9 +65,12 @@ describe('DMARC mapping', () => {
 		result('dmarc', record ? [{ status: 'ok', name: 'Record', value: record }] : [{ status: 'fail', name: 'DMARC', value: 'Not found' }]);
 
 	it('dmarc_missing', () => expect(mapDmarc(dmarc()).code).toBe('dmarc_missing'));
-	it('dmarc_policy_none (even without rua)', () => {
+	it('dmarc_policy_none (even without rua) is a fail; quarantine is only a warn', () => {
 		const m = mapDmarc(dmarc('v=DMARC1; p=none'));
 		expect(m.code).toBe('dmarc_policy_none');
+		expect(CODE_STATUS.dmarc_policy_none).toBe('fail');
+		expect(CODE_STATUS.dmarc_policy_quarantine).toBe('warn');
+		expect(CODE_STATUS.dkim_not_found_common_selectors).toBe('info');
 		expect(m.facts).toMatchObject({ policy: 'none', rua: null, record: 'v=DMARC1; p=none' });
 	});
 	it('dmarc_no_rua for enforcing policy without reports', () => {
@@ -238,7 +241,7 @@ describe('DNS / HTTPS mapping', () => {
 
 describe('report shape', () => {
 	const checks: HealthCheck[] = [
-		toCheck('dmarc', { code: 'dmarc_policy_none', facts: { policy: 'none' }, technical: 'v=DMARC1; p=none' }),
+		toCheck('dmarc', { code: 'dmarc_no_rua', facts: { policy: 'reject' }, technical: 'v=DMARC1; p=reject' }),
 		toCheck('spf', { code: 'spf_pass_hardfail', facts: {}, technical: 'v=spf1 -all' }),
 		toCheck('bimi', { code: 'bimi_missing', facts: {}, technical: '' }),
 		toCheck('mx', { code: 'mx_missing', facts: {}, technical: '' }),
@@ -253,7 +256,7 @@ describe('report shape', () => {
 			overall: 'fail',
 			checks: [
 				{ id: 'spf', status: 'pass', code: 'spf_pass_hardfail', facts: {}, technical: 'v=spf1 -all' },
-				{ id: 'dmarc', status: 'warn', code: 'dmarc_policy_none', facts: { policy: 'none' }, technical: 'v=DMARC1; p=none' },
+				{ id: 'dmarc', status: 'warn', code: 'dmarc_no_rua', facts: { policy: 'reject' }, technical: 'v=DMARC1; p=reject' },
 				{ id: 'mx', status: 'fail', code: 'mx_missing', facts: {}, technical: '' },
 				{ id: 'bimi', status: 'info', code: 'bimi_missing', facts: {}, technical: '' },
 			],

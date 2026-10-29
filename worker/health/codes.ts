@@ -34,13 +34,13 @@ export const CODE_STATUS = {
 
 	dmarc_missing: 'fail',
 	dmarc_invalid: 'fail',
-	dmarc_policy_none: 'warn',
+	dmarc_policy_none: 'fail',
 	dmarc_no_rua: 'warn',
-	dmarc_policy_quarantine: 'pass',
+	dmarc_policy_quarantine: 'warn',
 	dmarc_policy_reject: 'pass',
 
 	dkim_found: 'pass',
-	dkim_not_found_common_selectors: 'warn',
+	dkim_not_found_common_selectors: 'info',
 
 	mx_missing: 'fail',
 	mx_unresolved: 'warn',
