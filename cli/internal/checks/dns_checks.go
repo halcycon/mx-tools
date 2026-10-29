@@ -10,13 +10,51 @@ import (
 	"github.com/miekg/dns"
 )
 
-func lookup(name string, qtype uint16) ([]dns.RR, error) {
+var resolverAddr = "1.1.1.1:53"
+
+// SetResolver changes the recursive resolver used for every lookup.
+// "system" reads the first nameserver from /etc/resolv.conf; a bare IP gets port 53.
+func SetResolver(spec string) error {
+	spec = strings.TrimSpace(spec)
+	switch {
+	case spec == "":
+		return nil
+	case spec == "system":
+		conf, err := dns.ClientConfigFromFile("/etc/resolv.conf")
+		if err != nil || len(conf.Servers) == 0 {
+			return fmt.Errorf("read /etc/resolv.conf: %v", err)
+		}
+		resolverAddr = net.JoinHostPort(conf.Servers[0], conf.Port)
+	case net.ParseIP(spec) != nil:
+		resolverAddr = net.JoinHostPort(spec, "53")
+	default:
+		if _, _, err := net.SplitHostPort(spec); err != nil {
+			return fmt.Errorf("invalid resolver %q: %w", spec, err)
+		}
+		resolverAddr = spec
+	}
+	return nil
+}
+
+// Resolver reports the resolver address in use.
+func Resolver() string { return resolverAddr }
+
+func exchange(name string, qtype uint16) (*dns.Msg, error) {
 	c := new(dns.Client)
 	c.Timeout = 5 * time.Second
 	m := new(dns.Msg)
 	m.SetQuestion(dns.Fqdn(name), qtype)
 	m.RecursionDesired = true
-	r, _, err := c.Exchange(m, "1.1.1.1:53")
+	r, _, err := c.Exchange(m, resolverAddr)
+	if err == nil && r.Truncated {
+		c.Net = "tcp"
+		r, _, err = c.Exchange(m, resolverAddr)
+	}
+	return r, err
+}
+
+func lookup(name string, qtype uint16) ([]dns.RR, error) {
+	r, err := exchange(name, qtype)
 	if err != nil {
 		return nil, err
 	}

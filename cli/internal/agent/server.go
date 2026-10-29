@@ -17,9 +17,11 @@ import (
 )
 
 type Config struct {
-	Listen   string
-	Token    string
-	AllowLAN bool
+	Listen     string
+	Token      string
+	AllowLAN   bool
+	HMACSecret string
+	Resolver   string
 }
 
 func GenerateToken() (string, error) {
@@ -50,8 +52,16 @@ func Run(cfg Config) error {
 		fmt.Fprintf(os.Stderr, "mx agent: generated token (save this):\n  %s\n\n", cfg.Token)
 	}
 
+	if cfg.Resolver == "" {
+		cfg.Resolver = "system"
+	}
+	if err := checks.SetResolver(cfg.Resolver); err != nil {
+		return err
+	}
+
 	mux := http.NewServeMux()
-	s := &server{token: cfg.Token}
+	s := &server{token: cfg.Token, hmacSecret: cfg.HMACSecret}
+	mux.HandleFunc("/api/v1/probe", s.handleProbe)
 	mux.HandleFunc("/api/health", s.cors(s.handleHealth))
 	mux.HandleFunc("/api/config", s.cors(s.auth(s.handleConfig)))
 	mux.HandleFunc("/api/tools", s.cors(s.auth(s.handleTools)))
@@ -60,6 +70,12 @@ func Run(cfg Config) error {
 
 	fmt.Fprintf(os.Stderr, "mx agent listening on http://%s\n", cfg.Listen)
 	fmt.Fprintf(os.Stderr, "  Auth: Authorization: Bearer <token>  or  x-agent-token: <token>\n")
+	fmt.Fprintf(os.Stderr, "  DNS resolver: %s\n", checks.Resolver())
+	if cfg.HMACSecret != "" {
+		fmt.Fprintf(os.Stderr, "  /api/v1/probe: HMAC-signed requests only\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "  /api/v1/probe: bearer token (set MX_AGENT_HMAC_SECRET to require HMAC)\n")
+	}
 	if key := strings.TrimSpace(os.Getenv("SPAMHAUS_DQS_KEY")); key != "" {
 		fmt.Fprintf(os.Stderr, "  Spamhaus DQS: configured via SPAMHAUS_DQS_KEY\n")
 	} else {
@@ -76,7 +92,9 @@ func Run(cfg Config) error {
 }
 
 type server struct {
-	token string
+	token      string
+	hmacSecret string
+	replays    replayCache
 }
 
 func (s *server) cors(next http.HandlerFunc) http.HandlerFunc {

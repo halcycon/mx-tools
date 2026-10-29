@@ -8,13 +8,15 @@
     "dev": "concurrently -k -n web,api -c green,cyan \"vite\" \"wrangler dev\"",
     "dev:api": "wrangler dev",
     "dev:web": "vite",
-    "build": "vite build",
+    "build": "node scripts/sync-wording.mjs && vite build",
     "deploy": "npm run build && wrangler deploy",
     "start": "npm run build && wrangler dev",
     "test": "vitest",
     "cf-typegen": "wrangler types",
     "cli:build": "cd cli && go build -o ../bin/mx .",
-    "cli:run": "cd cli && go run ."
+    "cli:run": "cd cli && go run .",
+    "wording:sync": "node scripts/sync-wording.mjs",
+    "db:migrate": "wrangler d1 migrations apply mx-tools-reports --remote"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
@@ -26,7 +28,8 @@
     "typescript": "^5.5.2",
     "vite": "^8.2.2",
     "vitest": "~4.1.0",
-    "wrangler": "^4.125.0"
+    "wrangler": "^4.125.0",
+    "yaml": "^2.9.1"
   },
   "engines": {
     "node": ">=20"

@@ -1,13 +1,24 @@
 # Local Worker secrets (copy to .dev.vars — never commit .dev.vars)
 
-# Spamhaus Data Query Service key for private blacklist lookups.
-# wrangler secret put SPAMHAUS_DQS_KEY
+# Spamhaus Data Query Service key for /api/lookup on a private deploy.
+# Not used by /api/v1/*: the full report's DQS key lives on the VPS agent.
 SPAMHAUS_DQS_KEY=
 
-# Turnstile secret for POST /api/v1/health-check.
+# Turnstile secret for /api/v1/health-check and /api/v1/report-request.
 # wrangler secret put TURNSTILE_SECRET
 # Local dev: Cloudflare's always-pass test secret.
 TURNSTILE_SECRET=1x0000000000000000000000000000000AA
 
-# Allow http://localhost:1313 (Hugo dev) to call /api/v1/health-check.
+# Allow http://localhost:1313 (Hugo dev) to call /api/v1/*.
 HEALTH_CHECK_ALLOW_DEV_ORIGINS=true
+
+# VPS probe agent (mx agent). Local dev: run ./bin/mx agent with MX_AGENT_HMAC_SECRET set to the same value.
+AGENT_URL=http://127.0.0.1:8788
+AGENT_HMAC_SECRET=
+# Cloudflare Access service token, when the agent sits behind Tunnel + Access.
+AGENT_CLIENT_ID=
+AGENT_CLIENT_SECRET=
+
+# Full-report email. Local dev only simulates sending (files under .wrangler/tmp/email).
+LEAD_NOTIFY_TO=
+REPLY_TO=

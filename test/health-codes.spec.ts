@@ -144,6 +144,7 @@ describe('MTA-STS / TLSRPT / BIMI mapping', () => {
 });
 
 describe('blacklist mapping', () => {
+	const W = { spamhausDqs: false, source: 'worker' as const };
 	const hit = (list: string, zone: string, answers: string[], lookupFailed = false, rcode: number | null = answers.length ? 0 : 3) => ({
 		list,
 		ip: '192.0.2.10',
@@ -162,10 +163,10 @@ describe('blacklist mapping', () => {
 	});
 
 	it('blacklist_clean', () => {
-		expect(mapBlacklist(scan([hit('SpamCop', 'bl.spamcop.net', []), hit('DNSWL', 'list.dnswl.org', ['127.0.10.0'])]), false).code).toBe('blacklist_clean');
+		expect(mapBlacklist(scan([hit('SpamCop', 'bl.spamcop.net', []), hit('DNSWL', 'list.dnswl.org', ['127.0.10.0'])]), W).code).toBe('blacklist_clean');
 	});
 	it('Spamhaus open-resolver errors are inconclusive (info), never listed', () => {
-		const m = mapBlacklist(scan([hit('Spamhaus ZEN', 'zen.spamhaus.org', ['127.255.255.254']), hit('SpamCop', 'bl.spamcop.net', [])]), false);
+		const m = mapBlacklist(scan([hit('Spamhaus ZEN', 'zen.spamhaus.org', ['127.255.255.254']), hit('SpamCop', 'bl.spamcop.net', [])]), W);
 		expect(m.code).toBe('blacklist_inconclusive');
 		expect(CODE_STATUS[m.code]).toBe('info');
 		expect(m.facts).toMatchObject({ listed: [], inconclusive: [{ list: 'Spamhaus ZEN', reason: 'query_refused' }] });
@@ -174,23 +175,23 @@ describe('blacklist mapping', () => {
 		expect(isGenuineListing(['127.0.0.2'])).toBe(true);
 		expect(isGenuineListing(['127.0.0.1'])).toBe(false);
 		expect(isGenuineListing(['203.0.113.5'])).toBe(false);
-		const m = mapBlacklist(scan([hit('Parked', 'bhnc.njabl.org', ['203.0.113.5']), hit('SORBS', 'dnsbl.sorbs.net', [], true)]), false);
+		const m = mapBlacklist(scan([hit('Parked', 'bhnc.njabl.org', ['203.0.113.5']), hit('SORBS', 'dnsbl.sorbs.net', [], true)]), W);
 		expect(m.code).toBe('blacklist_inconclusive');
 		expect(m.facts).toMatchObject({ inconclusive: [{ reason: 'unexpected_answer' }, { reason: 'lookup_failed' }] });
 	});
 	it('SERVFAIL is inconclusive, not clean', () => {
-		const m = mapBlacklist(scan([hit('SpamCop', 'bl.spamcop.net', []), hit('PSBL', 'psbl.surriel.com', [], false, 2)]), false);
+		const m = mapBlacklist(scan([hit('SpamCop', 'bl.spamcop.net', []), hit('PSBL', 'psbl.surriel.com', [], false, 2)]), W);
 		expect(m.code).toBe('blacklist_inconclusive');
 		expect(m.facts).toMatchObject({ inconclusive: [{ list: 'PSBL', reason: 'lookup_failed' }] });
 	});
 
 	it('blacklist_listed for real listing codes', () => {
-		const m = mapBlacklist(scan([hit('SpamCop', 'bl.spamcop.net', ['127.0.0.2']), hit('Spamhaus ZEN', 'zen.spamhaus.org', ['127.255.255.254'])]), false);
+		const m = mapBlacklist(scan([hit('SpamCop', 'bl.spamcop.net', ['127.0.0.2']), hit('Spamhaus ZEN', 'zen.spamhaus.org', ['127.255.255.254'])]), W);
 		expect(m.code).toBe('blacklist_listed');
 		expect(m.facts).toMatchObject({ listed: [{ list: 'SpamCop', ip: '192.0.2.10', codes: ['127.0.0.2'] }] });
 	});
 	it('blacklist_no_ips', () => {
-		expect(mapBlacklist({ mx: [], check: [], skipped: [], listCount: 22, hits: [] }, false).code).toBe('blacklist_no_ips');
+		expect(mapBlacklist({ mx: [], check: [], skipped: [], listCount: 22, hits: [] }, W).code).toBe('blacklist_no_ips');
 	});
 });
 
