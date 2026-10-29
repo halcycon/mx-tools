@@ -1,12 +1,12 @@
 import { normalizeDomain } from './domain';
 import { runHealthCheck } from './run';
 import type { HealthReport } from './codes';
+import type { AgentEnv } from '../agent/client';
 
 export const HEALTH_CHECK_PATH = '/api/v1/health-check';
 
-export type HealthEnv = {
+export type HealthEnv = AgentEnv & {
 	TURNSTILE_SECRET?: string;
-	SPAMHAUS_DQS_KEY?: string;
 	HEALTH_CHECK_ALLOW_DEV_ORIGINS?: string;
 	HEALTH_CHECK_RATE_LIMITER?: RateLimit;
 };
@@ -24,7 +24,7 @@ export function allowedOrigin(origin: string | null, env: HealthEnv): string | n
 	return null;
 }
 
-function corsHeaders(origin: string | null): Record<string, string> {
+export function corsHeaders(origin: string | null): Record<string, string> {
 	const h: Record<string, string> = { vary: 'Origin' };
 	if (origin) {
 		h['access-control-allow-origin'] = origin;
@@ -35,7 +35,7 @@ function corsHeaders(origin: string | null): Record<string, string> {
 	return h;
 }
 
-function reply(body: unknown, status: number, origin: string | null, extra: Record<string, string> = {}): Response {
+export function reply(body: unknown, status: number, origin: string | null, extra: Record<string, string> = {}): Response {
 	return new Response(JSON.stringify(body), {
 		status,
 		headers: {
@@ -159,7 +159,7 @@ export async function handleHealthCheck(request: Request, env: HealthEnv, ctx: E
 		return reply(cached, 200, origin);
 	}
 
-	const { complete, report } = await runHealthCheck(domain, { spamhausDqsKey: env.SPAMHAUS_DQS_KEY });
+	const { complete, report } = await runHealthCheck(domain, { agent: env });
 	logOutcome({
 		outcome: complete ? 'ok' : 'upstream_timeout',
 		domain,

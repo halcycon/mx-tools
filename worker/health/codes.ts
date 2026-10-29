@@ -3,7 +3,9 @@ import type { BlacklistScan } from '../checks/run';
 import type { SpfFlatten } from '../checks/spf-flat';
 
 export const HEALTH_CHECK_IDS = ['spf', 'dmarc', 'dkim', 'mx', 'mta-sts', 'tlsrpt', 'blacklist', 'bimi', 'dns', 'https'] as const;
-export type HealthCheckId = (typeof HEALTH_CHECK_IDS)[number];
+/** Full (gated) report adds agent-only checks after the public ten. */
+export const CHECK_ORDER = [...HEALTH_CHECK_IDS, 'smtp', 'ptr'] as const;
+export type HealthCheckId = (typeof CHECK_ORDER)[number];
 export type HealthStatus = 'pass' | 'warn' | 'fail' | 'info';
 
 export type HealthCheck = {
@@ -74,6 +76,21 @@ export const CODE_STATUS = {
 	https_www_only: 'warn',
 	https_ok: 'pass',
 
+	// Full (gated) report only — need the VPS agent.
+	cert_expired: 'fail',
+	smtp_starttls_missing: 'fail',
+	cert_invalid: 'fail',
+	smtp_tls_failed: 'warn',
+	cert_expiring_soon: 'warn',
+	smtp_unreachable: 'info',
+	smtp_not_checked: 'info',
+	smtp_ok: 'pass',
+
+	ptr_missing: 'fail',
+	ptr_mismatch: 'warn',
+	ptr_not_checked: 'info',
+	ptr_ok: 'pass',
+
 	check_error: 'info',
 } as const satisfies Record<string, HealthStatus>;
 
@@ -98,7 +115,7 @@ export function buildReport(domain: string, checks: HealthCheck[], checkedAt: Da
 		checkedAt: checkedAt.toISOString().replace(/\.\d{3}Z$/, 'Z'),
 		score,
 		overall,
-		checks: [...checks].sort((a, b) => HEALTH_CHECK_IDS.indexOf(a.id) - HEALTH_CHECK_IDS.indexOf(b.id)),
+		checks: [...checks].sort((a, b) => CHECK_ORDER.indexOf(a.id) - CHECK_ORDER.indexOf(b.id)),
 	};
 }
 
@@ -241,7 +258,9 @@ export function isGenuineListing(answers: string[]): boolean {
 	);
 }
 
-export function mapBlacklist(scan: BlacklistScan, spamhausDqs: boolean): Mapped {
+export type BlacklistSource = { spamhausDqs: boolean; source: 'agent' | 'worker' };
+
+export function mapBlacklist(scan: BlacklistScan, { spamhausDqs, source }: BlacklistSource): Mapped {
 	const checkedIps = scan.check.map((a) => ({ ip: a.ip, role: a.role }));
 	const listed: Array<{ list: string; ip: string; role: string; codes: string[] }> = [];
 	const inconclusive: Array<{ list: string; ip: string; reason: 'query_refused' | 'lookup_failed' | 'unexpected_answer' }> = [];
@@ -257,7 +276,7 @@ export function mapBlacklist(scan: BlacklistScan, spamhausDqs: boolean): Mapped 
 		}
 	}
 
-	const facts = { checkedIps, listsChecked: scan.listCount, listed, inconclusive, spamhausDqs };
+	const facts = { checkedIps, listsChecked: scan.listCount, listed, inconclusive, spamhausDqs, source };
 	const text = technical.join('\n');
 	if (!scan.check.length) return { code: 'blacklist_no_ips', facts, technical: text };
 	if (listed.length) return { code: 'blacklist_listed', facts, technical: text };

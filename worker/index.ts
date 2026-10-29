@@ -2,8 +2,11 @@ import { parseQuery, TOOLS, type CheckResult, type LookupOptions } from './check
 import { analyzeHeaders, HEADER_MAX_BYTES } from './checks/headers';
 import { plannedChecks, runOne, streamOne } from './checks/run';
 import { handleHealthCheck, HEALTH_CHECK_PATH, type HealthEnv } from './health/handler';
+import { handleReportConfirm, handleReportRequest, REPORT_CONFIRM_PATH, REPORT_REQUEST_PATH, type FullReportEnv } from './report/handler';
+import { handleReportCron, handleReportQueue } from './report/queue';
+import type { ReportJob } from './report/config';
 
-type WorkerEnv = Env & HealthEnv;
+type WorkerEnv = Env & HealthEnv & FullReportEnv & { SPAMHAUS_DQS_KEY?: string };
 
 function json(data: unknown, status = 200): Response {
 	return new Response(JSON.stringify(data, null, 2), {
@@ -112,6 +115,12 @@ export default {
 		if (url.pathname === HEALTH_CHECK_PATH) {
 			return handleHealthCheck(request, bindings, ctx);
 		}
+		if (url.pathname === REPORT_REQUEST_PATH) {
+			return handleReportRequest(request, bindings);
+		}
+		if (url.pathname === REPORT_CONFIRM_PATH) {
+			return handleReportConfirm(request, bindings);
+		}
 
 		if (request.method === 'OPTIONS') {
 			return new Response(null, {
@@ -159,5 +168,13 @@ export default {
 
 		// Static assets (SPA)
 		return env.ASSETS.fetch(request);
+	},
+
+	async queue(batch, env): Promise<void> {
+		await handleReportQueue(batch as MessageBatch<ReportJob>, env as WorkerEnv);
+	},
+
+	async scheduled(_controller, env): Promise<void> {
+		await handleReportCron(env as WorkerEnv);
 	},
 } satisfies ExportedHandler<Env>;

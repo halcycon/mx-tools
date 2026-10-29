@@ -11,9 +11,43 @@
 		"run_worker_first": ["/api/*"]
 	},
 	"vars": {
-		// "true" also allows http://localhost:1313 (Hugo dev) to call /api/v1/health-check
-		"HEALTH_CHECK_ALLOW_DEV_ORIGINS": "false"
+		// "true" also allows http://localhost:1313 (Hugo dev) to call /api/v1/*
+		"HEALTH_CHECK_ALLOW_DEV_ORIGINS": "false",
+
+		// Full report (gated). Secrets: TURNSTILE_SECRET, LEAD_NOTIFY_TO, REPLY_TO,
+		// AGENT_URL, AGENT_HMAC_SECRET, AGENT_CLIENT_ID, AGENT_CLIENT_SECRET (see README).
+		"REPORT_FROM": "reports@thecuckoocamp.co.uk",
+		"REPORT_FROM_NAME": "The Cuckoo Camp",
+		"SITE_URL": "https://www.thecuckoocamp.co.uk",
+		"BOOKING_URL": "https://www.thecuckoocamp.co.uk/contact/",
+
+		// Limits (all optional; defaults in worker/report/config.ts)
+		"REPORT_DOMAIN_PER_HOUR": "1",
+		"REPORT_DOMAIN_PER_DAY": "3",
+		"REPORT_EMAIL_CONFIRMED_PER_DAY": "3",
+		"REPORT_EMAIL_PENDING_PER_DAY": "5",
+		"REPORT_IP_PER_HOUR": "5",
+		"REPORT_IP_PER_DAY": "10",
+		"CONFIRM_EMAIL_COOLDOWN_MINUTES": "10",
+		"DAILY_REPORT_CAP": "200",
+		"TOKEN_TTL_HOURS": "24",
+		"RESULT_CACHE_HOURS": "24",
+		"RETENTION_DAYS": "90"
 	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "mx-tools-reports",
+			"database_id": "8cd46063-68aa-40b1-b862-4830eb034acc",
+			"migrations_dir": "migrations"
+		}
+	],
+	"queues": {
+		"producers": [{ "binding": "REPORT_QUEUE", "queue": "mx-tools-reports" }],
+		"consumers": [{ "queue": "mx-tools-reports", "max_batch_size": 1, "max_retries": 3 }]
+	},
+	"send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["reports@thecuckoocamp.co.uk"] }],
+	"triggers": { "crons": ["*/15 * * * *"] },
 	"ratelimits": [
 		{
 			// Per hashed client IP, per Cloudflare location (approximate). Period must be 10 or 60.

@@ -1,0 +1,485 @@
+{
+	"_source": "healthcheck.yaml",
+	"statuses": {
+		"fail": {
+			"label": "Needs fixing"
+		},
+		"warn": {
+			"label": "Worth improving"
+		},
+		"pass": {
+			"label": "Good"
+		},
+		"info": {
+			"label": "Couldn't check"
+		}
+	},
+	"summary": {
+		"attention_one": "1 thing needs attention",
+		"attention_many": "{count} things need attention",
+		"all_good": "Everything we checked looks good",
+		"partial": "Some checks took too long, so these results are incomplete. Try again in a minute for the full picture."
+	},
+	"checks": {
+		"spf": {
+			"title": "Have you listed who can send your email?",
+			"pass": "Yes. Your domain publishes a list of the services allowed to send email for you.",
+			"warn": "Partly. You have a list, but it could be tighter so receivers trust it more.",
+			"fail": "There's a problem with your list of allowed senders, so your genuine emails may land in spam.",
+			"info": "We couldn't check your list of allowed senders this time."
+		},
+		"dmarc": {
+			"title": "Can someone fake emails from you?",
+			"pass": "It's hard. Your domain tells receivers to block or quarantine fake mail.",
+			"warn": "It's possible. Your protection against fake emails could be stronger.",
+			"fail": "Yes, at the moment. There's nothing telling receivers what to do with fake mail from your domain.",
+			"info": "We couldn't check your protection against fake emails this time."
+		},
+		"dkim": {
+			"title": "Are your emails signed?",
+			"pass": "Yes. Your emails carry a signature that proves they really came from you.",
+			"warn": "We couldn't confirm your emails are signed. This is worth a closer look.",
+			"fail": "We found a problem with your email signature, so receivers may not trust your mail.",
+			"info": "We couldn't check your email signature this time."
+		},
+		"mx": {
+			"title": "Can your domain receive email?",
+			"pass": "Yes. Your domain says where its email should be delivered.",
+			"warn": "Mostly, but something about where your email is delivered could be more reliable.",
+			"fail": "Not reliably. Other mail servers may not know where to deliver your email.",
+			"info": "We couldn't check where your email is delivered this time."
+		},
+		"mta-sts": {
+			"title": "Is your email protected in transit?",
+			"pass": "Yes. Your domain insists that email sent to you travels over a secure connection.",
+			"warn": "Not fully. Adding protection here stops attackers downgrading the connection. Worth improving, not urgent.",
+			"fail": "There's a problem with your in-transit protection that's worth fixing.",
+			"info": "We couldn't check your in-transit protection this time."
+		},
+		"tlsrpt": {
+			"title": "Will you hear about delivery problems?",
+			"pass": "Yes. Other mail servers can send you reports if they have trouble delivering to you securely.",
+			"warn": "Not yet. Turning on delivery reports helps you spot problems early. Nice to have, not urgent.",
+			"fail": "Your delivery reports are set up but have a problem.",
+			"info": "We couldn't check your delivery reports this time."
+		},
+		"blacklist": {
+			"title": "Is your mail server on a spam blocklist?",
+			"pass": "No. We didn't find your mail server on the blocklists we checked.",
+			"warn": "Possibly. It's listed on a minor blocklist, which can affect a few receivers.",
+			"fail": "Yes. Some receivers may reject your mail until this is cleared.",
+			"info": "We couldn't get a clear answer this time. Try again later."
+		},
+		"bimi": {
+			"title": "Can your logo appear next to your emails?",
+			"pass": "Yes. Your domain is set up to show your logo in email apps that support it.",
+			"warn": "You've started setting this up, but something isn't quite right yet.",
+			"fail": "Your logo set-up has a problem, so it won't be shown.",
+			"info": "Not set up. This is optional and only worth doing once everything else is in place."
+		},
+		"dns": {
+			"title": "Is your domain's address book healthy?",
+			"pass": "Yes. The records that point people to your website and email are answering properly.",
+			"warn": "Mostly, but your domain's set-up could be more resilient.",
+			"fail": "There's a problem with your domain's records that could affect your website and email.",
+			"info": "We couldn't check your domain's records this time."
+		},
+		"https": {
+			"title": "Does your website load securely?",
+			"pass": "Yes. Your website loads over a secure connection.",
+			"warn": "Mostly, but visitors might not always be sent to the secure version.",
+			"fail": "No. Visitors may see a security warning when they open your website.",
+			"info": "We couldn't reach your website to check this time."
+		},
+		"smtp": {
+			"title": "Is your mail server set up securely?",
+			"pass": "Yes. Your mail server answers properly and supports encrypted connections.",
+			"warn": "Mostly, but something about your mail server's security could be better.",
+			"fail": "There's a problem with your mail server's security that's worth fixing.",
+			"info": "We couldn't test your mail server this time."
+		},
+		"ptr": {
+			"title": "Does your mail server identify itself properly?",
+			"pass": "Yes. Its address and name match both ways.",
+			"warn": "Partly. Its name and address don't fully match.",
+			"fail": "No. Your mail server's address has no proper name attached to it.",
+			"info": "We couldn't check this time."
+		}
+	},
+	"codes": {
+		"spf_pass_hardfail": {
+			"title": "Have you listed who can send your email?",
+			"label": "Good",
+			"text": "Yes, and you tell receivers to reject anything sent from elsewhere.",
+			"why": "This stops spammers sending mail that claims to be from you.",
+			"fix": "Nothing to do. Remember to update it if you add a new service that sends email for you."
+		},
+		"spf_softfail_all": {
+			"title": "Have you listed who can send your email?",
+			"label": "Worth improving",
+			"text": "Yes, but mail from unlisted senders is only marked as suspicious, not rejected.",
+			"why": "That's a common, safe starting point, but it gives fakes a better chance of getting through.",
+			"fix": "Once you're sure every service that sends for you is listed, tighten it (~all to -all), or rely on a strict DMARC policy."
+		},
+		"spf_missing": {
+			"title": "Have you listed who can send your email?",
+			"label": "Needs fixing",
+			"text": "Not yet. There's no list of who's allowed to send email as you.",
+			"why": "Your genuine emails are more likely to land in spam, and anyone can pretend to be you.",
+			"fix": "Add an SPF record listing your email provider and any other services that send email for you (newsletters, booking systems, invoices)."
+		},
+		"spf_multiple": {
+			"title": "Have you listed who can send your email?",
+			"label": "Needs fixing",
+			"text": "You have more than one sender list, which confuses receiving servers. They will treat it as broken.",
+			"why": "Broken SPF means your mail may be rejected or sent to spam.",
+			"fix": "Merge them into a single SPF record."
+		},
+		"spf_too_many_lookups": {
+			"title": "Is your sender list too complicated?",
+			"label": "Needs fixing",
+			"text": "Your sender list points to so many other lists that receivers give up checking it (the limit is 10).",
+			"why": "Receivers treat it as an error, so your email may fail checks and land in spam.",
+			"fix": "Remove services you no longer use, or 'flatten' the record. This is a common fix and we can help."
+		},
+		"spf_pass_all": {
+			"title": "Have you listed who can send your email?",
+			"label": "Needs fixing",
+			"text": "Your list currently says anyone can send as you, which defeats the point.",
+			"why": "Anyone can send email that passes as you.",
+			"fix": "Change the end of your SPF record from +all to -all (or ~all). This is a quick fix."
+		},
+		"spf_neutral_all": {
+			"title": "Have you listed who can send your email?",
+			"label": "Worth improving",
+			"text": "You have a list, but it doesn't tell receivers what to do with mail from anyone else.",
+			"why": "Receivers get no guidance, so fakes are treated the same as your genuine mail.",
+			"fix": "End your SPF record with -all (or ~all while you're checking)."
+		},
+		"dmarc_policy_reject": {
+			"title": "Can someone fake emails from you?",
+			"label": "Good",
+			"text": "No. You tell receivers to reject fake emails claiming to be from you.",
+			"why": "This is the strongest protection against people impersonating you.",
+			"fix": "Nothing to do. Keep an eye on your reports."
+		},
+		"dmarc_policy_quarantine": {
+			"title": "Can someone fake emails from you?",
+			"label": "Worth improving",
+			"text": "Mostly no. Fake emails claiming to be from you are sent to spam folders.",
+			"why": "Good protection, though fakes may still be seen in spam folders.",
+			"fix": "When your reports show only genuine mail passing, move to p=reject."
+		},
+		"dmarc_policy_none": {
+			"title": "Can someone fake emails from you?",
+			"label": "Needs fixing",
+			"text": "Yes, at the moment. Your domain tells receivers to deliver fake mail anyway.",
+			"why": "Scammers can send invoices or donation requests that look like they came from you.",
+			"fix": "Move your DMARC policy to quarantine, then reject, once your genuine senders pass. This is usually a quick fix."
+		},
+		"dmarc_missing": {
+			"title": "Can someone fake emails from you?",
+			"label": "Needs fixing",
+			"text": "Yes. Your domain has no DMARC policy, so receivers don't know what to do with fakes.",
+			"why": "Gmail and Microsoft now expect DMARC from senders. Without it, your mail is more likely to be filtered, and impersonation is easy.",
+			"fix": "Add a DMARC record, starting with monitoring and tightening it over a few weeks."
+		},
+		"dmarc_no_rua": {
+			"title": "Do you get reports on who's sending as you?",
+			"label": "Worth improving",
+			"text": "No. Your DMARC policy doesn't ask for reports.",
+			"why": "Reports show who is sending email using your name, both genuine services and fakes.",
+			"fix": "Add a reporting address (rua=) to your DMARC record."
+		},
+		"dmarc_invalid": {
+			"title": "Can someone fake emails from you?",
+			"label": "Needs fixing",
+			"text": "Your DMARC record has a mistake in it, so receivers may ignore it.",
+			"why": "A broken policy gives you no protection.",
+			"fix": "Fix the record so it includes a valid policy (p=none, quarantine or reject)."
+		},
+		"dkim_found": {
+			"title": "Are your emails signed?",
+			"label": "Good",
+			"text": "Yes. We found a signing key, so receivers can check your emails haven't been tampered with.",
+			"why": "Signed mail is trusted more and is less likely to land in spam.",
+			"fix": "Nothing to do."
+		},
+		"dkim_not_found_common_selectors": {
+			"title": "Are your emails signed?",
+			"label": "Couldn't check",
+			"text": "We couldn't find a signing key in the usual places. Your provider may use a custom one, so this isn't always a problem.",
+			"why": "Unsigned mail is trusted less and more likely to land in spam.",
+			"fix": "Check that DKIM signing is switched on with your email provider. Our full report looks more deeply."
+		},
+		"mx_ok": {
+			"title": "Can your domain receive email?",
+			"label": "Good",
+			"text": "Yes. Your domain says which servers accept its email, and we could find them.",
+			"why": "Without this, nobody can email you at your domain.",
+			"fix": "Nothing to do."
+		},
+		"mx_missing": {
+			"title": "Can your domain receive email?",
+			"label": "Needs fixing",
+			"text": "We couldn't find any servers set up to receive email for your domain.",
+			"why": "Emails sent to your addresses will bounce or vanish.",
+			"fix": "Add MX records pointing to your email provider. Your provider's setup guide lists the exact values."
+		},
+		"mx_unresolved": {
+			"title": "Can your domain receive email?",
+			"label": "Worth improving",
+			"text": "Your domain points to a mail server we couldn't find, so email to you may not arrive.",
+			"why": "Senders can't deliver to a server that doesn't exist.",
+			"fix": "Check the MX record's server name with your email provider."
+		},
+		"mx_null": {
+			"title": "Can your domain receive email?",
+			"label": "Not used",
+			"text": "Your domain says it doesn't receive email. That's fine if it's deliberate.",
+			"why": "Anyone emailing this domain gets a bounce straight away.",
+			"fix": "Nothing to do if this domain isn't used for email."
+		},
+		"mtasts_enforce": {
+			"title": "Is your email protected in transit?",
+			"label": "Good",
+			"text": "Yes. Other servers must use a secure, verified connection when sending you email.",
+			"why": "This stops attackers quietly intercepting email on its way to you.",
+			"fix": "Nothing to do."
+		},
+		"mtasts_testing": {
+			"title": "Is your email protected in transit?",
+			"label": "Optional",
+			"text": "Partly. Your policy is in testing mode, so problems are reported but not blocked.",
+			"why": "Testing is a sensible first step, but it doesn't yet protect your mail.",
+			"fix": "After a few weeks of clean reports, switch the policy to enforce."
+		},
+		"mtasts_missing": {
+			"title": "Is your email protected in transit?",
+			"label": "Optional",
+			"text": "Not fully. Without MTA-STS, an attacker could force email to you over an insecure connection.",
+			"why": "It's a less common attack, but this closes it off.",
+			"fix": "Publish an MTA-STS policy. It's worth improving, not urgent."
+		},
+		"mtasts_policy_error": {
+			"title": "Is your email protected in transit?",
+			"label": "Worth improving",
+			"text": "You've started setting this up, but we couldn't read your policy file, so it isn't working yet.",
+			"why": "Without a readable policy, other servers ignore it.",
+			"fix": "Make sure https://mta-sts.yourdomain/.well-known/mta-sts.txt loads and lists a mode."
+		},
+		"mtasts_none": {
+			"title": "Is your email protected in transit?",
+			"label": "Optional",
+			"text": "It's set up but switched off, so it isn't protecting anything yet.",
+			"why": "Testing, then enforcing, closes off attacks that downgrade the connection.",
+			"fix": "Switch the policy to testing, then enforce."
+		},
+		"tlsrpt_ok": {
+			"title": "Will you hear about delivery problems?",
+			"label": "Good",
+			"text": "Yes. Other servers will report when they can't deliver to you securely.",
+			"why": "You'll spot problems before they turn into missing email.",
+			"fix": "Nothing to do."
+		},
+		"tlsrpt_missing": {
+			"title": "Will you hear about delivery problems?",
+			"label": "Optional",
+			"text": "No. You haven't asked other servers to report secure-delivery failures.",
+			"why": "Problems could go unnoticed until someone says your email never arrived.",
+			"fix": "Add a TLS reporting (TLSRPT) record. It takes one line of DNS."
+		},
+		"blacklist_clean": {
+			"title": "Is your mail server on a spam blocklist?",
+			"label": "Good",
+			"text": "No. Your mail servers aren't on any of the blocklists we checked.",
+			"why": "Listed servers have their email rejected or sent to spam.",
+			"fix": "Nothing to do."
+		},
+		"blacklist_listed": {
+			"title": "Is your mail server on a spam blocklist?",
+			"label": "Needs fixing",
+			"text": "Yes. Some receivers may reject your email until this is cleared.",
+			"why": "Your emails may be bouncing or going to spam without you knowing.",
+			"fix": "Find and fix the cause (often a hacked account or a shared server), then request removal. We can help."
+		},
+		"blacklist_inconclusive": {
+			"title": "Is your mail server on a spam blocklist?",
+			"label": "Couldn't check",
+			"text": "We couldn't get a clear answer this time. The full report uses a more reliable check.",
+			"why": "Listed servers have their email rejected or sent to spam.",
+			"fix": "Request the full report, or try again later."
+		},
+		"blacklist_no_ips": {
+			"title": "Is your mail server on a spam blocklist?",
+			"label": "Couldn't check",
+			"text": "We couldn't find a mail server address to check, so we skipped this one.",
+			"why": "Listed servers have their email rejected or sent to spam.",
+			"fix": "Nothing to do unless this domain sends email."
+		},
+		"bimi_ok": {
+			"title": "Does your logo show in inboxes?",
+			"label": "Good",
+			"text": "Yes. You've set up BIMI, so supporting inboxes can show your logo next to your emails.",
+			"why": "It's a small boost to trust and recognition.",
+			"fix": "Nothing to do."
+		},
+		"bimi_missing": {
+			"title": "Does your logo show in inboxes?",
+			"label": "Optional",
+			"text": "Not yet. This is optional, and it only works once your DMARC policy is strict.",
+			"why": "Some inboxes show your logo next to your emails, which helps people trust them.",
+			"fix": "Optional. Consider it after DMARC is set to quarantine or reject."
+		},
+		"dns_ok": {
+			"title": "Is your domain's DNS set up reliably?",
+			"label": "Good",
+			"text": "Yes. Your domain has more than one nameserver answering properly.",
+			"why": "If your DNS goes down, so do your email and website.",
+			"fix": "Nothing to do."
+		},
+		"dns_single_ns": {
+			"title": "Is your domain's DNS set up reliably?",
+			"label": "Worth improving",
+			"text": "Your domain relies on a single nameserver.",
+			"why": "If it goes down, your email and website stop working.",
+			"fix": "Use a DNS provider with at least two nameservers."
+		},
+		"dns_no_nameservers": {
+			"title": "Is your domain's DNS set up reliably?",
+			"label": "Needs fixing",
+			"text": "We couldn't find the servers that answer for your domain.",
+			"why": "Without them, your website and email stop working.",
+			"fix": "Check the domain is registered and its nameservers are set at your registrar."
+		},
+		"dns_ns_unresolved": {
+			"title": "Is your domain's DNS set up reliably?",
+			"label": "Worth improving",
+			"text": "One of the servers that answers for your domain can't be found.",
+			"why": "Some lookups will fail, making your website and email unreliable.",
+			"fix": "Remove or fix the broken nameserver at your registrar."
+		},
+		"https_ok": {
+			"title": "Is your website secure?",
+			"label": "Good",
+			"text": "Yes. Your website loads over a secure connection.",
+			"why": "Browsers warn visitors away from insecure sites.",
+			"fix": "Nothing to do."
+		},
+		"https_fail": {
+			"title": "Is your website secure?",
+			"label": "Needs fixing",
+			"text": "We couldn't load your website securely.",
+			"why": "Visitors may see a security warning or an error page.",
+			"fix": "Check your website's certificate and hosting. Many hosts offer free certificates."
+		},
+		"https_http_error": {
+			"title": "Is your website secure?",
+			"label": "Worth improving",
+			"text": "Your website answered, but with an error, so visitors may not see your pages.",
+			"why": "Visitors may think your site is down.",
+			"fix": "Check your hosting or ask your web developer. It's fine if this domain is only used for email."
+		},
+		"https_www_only": {
+			"title": "Is your website secure?",
+			"label": "Worth improving",
+			"text": "Only with www in front. Visitors who type your address without it may not reach your site.",
+			"why": "Many people type the short version, and they'll see an error.",
+			"fix": "Make the bare domain redirect to www. Most hosts and DNS providers have a setting for this."
+		},
+		"smtp_ok": {
+			"title": "Is your mail server set up securely?",
+			"label": "Good",
+			"text": "Yes. Your mail server answers properly and supports encrypted connections.",
+			"why": "Email sent to you is protected on the way in.",
+			"fix": "Nothing to do."
+		},
+		"smtp_starttls_missing": {
+			"title": "Does your mail server encrypt incoming email?",
+			"label": "Needs fixing",
+			"text": "No. Your mail server doesn't offer an encrypted connection.",
+			"why": "Email sent to you travels across the internet readable by anyone in the path.",
+			"fix": "Enable STARTTLS with a valid certificate on your mail server, or ask your provider."
+		},
+		"smtp_unreachable": {
+			"title": "Is your mail server set up securely?",
+			"label": "Couldn't check",
+			"text": "We couldn't connect to your mail server from our test location this time.",
+			"why": "This doesn't always mean there's a problem, as some networks block test connections.",
+			"fix": "If people also report bounces, check your mail server is running and reachable."
+		},
+		"cert_ok": {
+			"title": "Is your mail server's certificate valid?",
+			"label": "Good",
+			"text": "Yes. Its security certificate is valid and in date.",
+			"why": "Valid certificates let other servers trust the connection.",
+			"fix": "Nothing to do."
+		},
+		"cert_expiring_soon": {
+			"title": "Is your mail server's certificate valid?",
+			"label": "Worth improving",
+			"text": "It's valid, but it expires soon.",
+			"why": "When it expires, some servers will stop delivering email to you securely, or at all.",
+			"fix": "Renew it now, or set up automatic renewal."
+		},
+		"cert_expired": {
+			"title": "Is your mail server's certificate valid?",
+			"label": "Needs fixing",
+			"text": "No. Your mail server's certificate has expired.",
+			"why": "Servers with strict security, including yours if you use MTA-STS, may refuse to deliver email.",
+			"fix": "Renew the certificate straight away and set up automatic renewal."
+		},
+		"cert_invalid": {
+			"title": "Is your mail server's certificate valid?",
+			"label": "Needs fixing",
+			"text": "No. The certificate doesn't match your mail server's name, or isn't trusted.",
+			"why": "Other servers can't confirm they're talking to the real you.",
+			"fix": "Install a certificate issued for your mail server's hostname, from a trusted authority."
+		},
+		"smtp_tls_failed": {
+			"title": "Does your mail server encrypt incoming email?",
+			"label": "Worth improving",
+			"text": "It offers encryption, but the secure connection failed when we tried it.",
+			"why": "Senders may fall back to unencrypted delivery, or fail to deliver.",
+			"fix": "Check the mail server's TLS settings and certificate, or ask your provider."
+		},
+		"smtp_not_checked": {
+			"title": "Is your mail server set up securely?",
+			"label": "Couldn't check",
+			"text": "We couldn't test your mail server this time.",
+			"why": "This doesn't mean there's a problem.",
+			"fix": "Nothing to do. Ask us if you'd like it checked again."
+		},
+		"ptr_ok": {
+			"title": "Does your mail server identify itself properly?",
+			"label": "Good",
+			"text": "Yes. Its address and name match both ways.",
+			"why": "Receivers trust servers whose name and address match.",
+			"fix": "Nothing to do."
+		},
+		"ptr_missing": {
+			"title": "Does your mail server identify itself properly?",
+			"label": "Needs fixing",
+			"text": "No. Your mail server's address has no name attached to it.",
+			"why": "Many receivers reject or spam-filter mail from servers without a matching name.",
+			"fix": "Ask your hosting provider to set reverse DNS (PTR) for the server's IP address."
+		},
+		"ptr_mismatch": {
+			"title": "Does your mail server identify itself properly?",
+			"label": "Worth improving",
+			"text": "Partly. Its address points to a name that doesn't point back to the same address.",
+			"why": "Some receivers treat this as suspicious.",
+			"fix": "Make the reverse DNS name and the server's own DNS record match."
+		},
+		"ptr_not_checked": {
+			"title": "Does your mail server identify itself properly?",
+			"label": "Couldn't check",
+			"text": "We couldn't check this time.",
+			"why": "This doesn't mean there's a problem.",
+			"fix": "Nothing to do."
+		},
+		"check_error": {
+			"text": "We couldn't complete this check this time. Try again in a minute."
+		}
+	}
+}

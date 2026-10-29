@@ -1,5 +1,7 @@
-import { runBimi, runDkim, runDmarc, runDnsHealth, runHttp, runMtaSts, runMx, runSpf, runTlsrpt, scanBlacklist } from '../checks/run';
+import { runBimi, runDkim, runDmarc, runDnsHealth, runHttp, runMtaSts, runMx, runSpf, runTlsrpt, scanBlacklist, type BlacklistScan } from '../checks/run';
 import { flattenSpf } from '../checks/spf-flat';
+import { interpretDnsblCodes } from '../checks/dnsbl-codes';
+import { probeAgent, type AgentEnv, type AgentProbe } from '../agent/client';
 import {
 	buildReport,
 	errorCheck,
@@ -32,9 +34,46 @@ export const DOH_UNREACHABLE_DNSBLS: ReadonlySet<string> = new Set([
 	'spam.spamrats.com',
 ]);
 
+export const AGENT_QUICK_TIMEOUT_MS = 7_000;
+
 export type HealthJob = { id: HealthCheckId; run: () => Promise<HealthCheck> };
 
-export function healthJobs(domain: string, spamhausDqsKey?: string): HealthJob[] {
+export type HealthJobOptions = {
+	/** VPS agent for accurate DNSBL; the Worker's DoH scan is the fallback. */
+	agent?: AgentEnv;
+	dkimSelectors?: readonly string[];
+};
+
+export function agentScan(dnsbl: AgentProbe['dnsbl']): BlacklistScan {
+	const addr = (a: { ip: string; role: string }) => ({ ip: a.ip, role: a.role, cloudflare: false });
+	return {
+		mx: dnsbl.mx ?? [],
+		check: (dnsbl.checked ?? []).map(addr),
+		skipped: (dnsbl.skipped ?? []).map(addr),
+		listCount: dnsbl.listCount,
+		hits: (dnsbl.hits ?? []).map((h) => ({
+			list: h.list,
+			ip: h.ip,
+			role: h.role,
+			answers: h.answers ?? [],
+			lookupFailed: Boolean(h.error),
+			rcode: h.rcode,
+			interp: interpretDnsblCodes(h.zone, h.answers ?? [], h.zone.includes('dnswl')),
+		})),
+	};
+}
+
+export async function workerBlacklistCheck(domain: string): Promise<HealthCheck> {
+	const scan = await scanBlacklist(domain, {}, { skipZones: DOH_UNREACHABLE_DNSBLS, queryTimeoutMs: 4_000, concurrency: 6 });
+	return toCheck('blacklist', mapBlacklist(scan, { spamhausDqs: false, source: 'worker' }));
+}
+
+export function agentBlacklistCheck(probe: AgentProbe): HealthCheck {
+	return toCheck('blacklist', mapBlacklist(agentScan(probe.dnsbl), { spamhausDqs: probe.dnsbl.dqs, source: 'agent' }));
+}
+
+export function healthJobs(domain: string, opts: HealthJobOptions = {}): HealthJob[] {
+	const selectors = opts.dkimSelectors ?? DKIM_SELECTORS;
 	return [
 		{
 			id: 'spf',
@@ -48,7 +87,7 @@ export function healthJobs(domain: string, spamhausDqsKey?: string): HealthJob[]
 			id: 'dkim',
 			run: async () => {
 				const results = await Promise.all(
-					DKIM_SELECTORS.map(async (selector) => ({ selector, result: await runDkim(domain, selector) })),
+					selectors.map(async (selector) => ({ selector, result: await runDkim(domain, selector) })),
 				);
 				return toCheck('dkim', mapDkim(results));
 			},
@@ -59,12 +98,8 @@ export function healthJobs(domain: string, spamhausDqsKey?: string): HealthJob[]
 		{
 			id: 'blacklist',
 			run: async () => {
-				const scan = await scanBlacklist(
-					domain,
-					{ spamhausDqsKey },
-					{ skipZones: DOH_UNREACHABLE_DNSBLS, queryTimeoutMs: 4_000, concurrency: 6 },
-				);
-				return toCheck('blacklist', mapBlacklist(scan, Boolean(spamhausDqsKey?.trim())));
+				const probe = opts.agent ? await probeAgent(opts.agent, domain, 'quick', AGENT_QUICK_TIMEOUT_MS) : null;
+				return probe ? agentBlacklistCheck(probe) : workerBlacklistCheck(domain);
 			},
 		},
 		{ id: 'bimi', run: async () => toCheck('bimi', mapBimi(await runBimi(domain))) },
@@ -104,9 +139,9 @@ export async function runJobs(jobs: HealthJob[], timeoutMs: number): Promise<{ c
 
 export async function runHealthCheck(
 	domain: string,
-	opts: { spamhausDqsKey?: string; timeoutMs?: number } = {},
+	opts: { agent?: AgentEnv; timeoutMs?: number } = {},
 ): Promise<{ complete: boolean; report: HealthReport }> {
 	const checkedAt = new Date();
-	const { complete, checks } = await runJobs(healthJobs(domain, opts.spamhausDqsKey), opts.timeoutMs ?? HEALTH_CHECK_TIMEOUT_MS);
+	const { complete, checks } = await runJobs(healthJobs(domain, { agent: opts.agent }), opts.timeoutMs ?? HEALTH_CHECK_TIMEOUT_MS);
 	return { complete, report: buildReport(domain, checks, checkedAt) };
 }

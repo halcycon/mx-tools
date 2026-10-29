@@ -104,6 +104,11 @@ func runAgent(args []string) error {
 			cfg.Token = args[i]
 		case strings.HasPrefix(a, "--token="):
 			cfg.Token = strings.TrimPrefix(a, "--token=")
+		case a == "--resolver" && i+1 < len(args):
+			i++
+			cfg.Resolver = args[i]
+		case strings.HasPrefix(a, "--resolver="):
+			cfg.Resolver = strings.TrimPrefix(a, "--resolver=")
 		default:
 			return fmt.Errorf("unknown agent flag: %s\n\nrun: mx agent --help", a)
 		}
@@ -111,6 +116,10 @@ func runAgent(args []string) error {
 	if env := strings.TrimSpace(os.Getenv("MX_AGENT_TOKEN")); cfg.Token == "" && env != "" {
 		cfg.Token = env
 	}
+	if env := strings.TrimSpace(os.Getenv("MX_RESOLVER")); cfg.Resolver == "" && env != "" {
+		cfg.Resolver = env
+	}
+	cfg.HMACSecret = strings.TrimSpace(os.Getenv("MX_AGENT_HMAC_SECRET"))
 	return agent.Run(cfg)
 }
 
@@ -121,16 +130,19 @@ Runs the same checks as the CLI on this machine (local DNS, SMTP :25, ping).
 Point the web UI Settings → Probe agent at the listen URL + token.
 
 Usage:
-  mx agent [--listen 127.0.0.1:8788] [--token SECRET] [--allow-lan]
+  mx agent [--listen 127.0.0.1:8788] [--token SECRET] [--resolver system] [--allow-lan]
 
 Flags:
-  --listen ADDR   Bind address (default 127.0.0.1:8788)
-  --token SECRET  Bearer token (or MX_AGENT_TOKEN). Auto-generated if omitted.
-  --allow-lan     Required to bind a non-loopback address
+  --listen ADDR     Bind address (default 127.0.0.1:8788)
+  --token SECRET    Bearer token (or MX_AGENT_TOKEN). Auto-generated if omitted.
+  --resolver ADDR   Recursive resolver: "system" (default, /etc/resolv.conf), IP, or IP:port
+  --allow-lan       Required to bind a non-loopback address
 
 Env:
-  MX_AGENT_TOKEN      Same as --token
-  SPAMHAUS_DQS_KEY    Optional DQS key for Spamhaus (stays on this host)
+  MX_AGENT_TOKEN        Same as --token
+  MX_RESOLVER           Same as --resolver
+  MX_AGENT_HMAC_SECRET  Require HMAC-signed requests on POST /api/v1/probe (Worker AGENT_HMAC_SECRET)
+  SPAMHAUS_DQS_KEY      Optional DQS key for Spamhaus (stays on this host)
 
 Examples:
   mx agent
