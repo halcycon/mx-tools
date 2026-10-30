@@ -116,14 +116,27 @@ export function healthJobs(domain: string, opts: HealthJobOptions = {}): HealthJ
 	];
 }
 
-/** Run all jobs concurrently; anything unfinished at the deadline is omitted and `complete` is false. */
-export async function runJobs(jobs: HealthJob[], timeoutMs: number): Promise<{ complete: boolean; checks: HealthCheck[] }> {
+/**
+ * Run all jobs concurrently; anything unfinished at the deadline is omitted and `complete` is false.
+ * `onCheck` fires in completion order, and never after the deadline.
+ */
+export async function runJobs(
+	jobs: HealthJob[],
+	timeoutMs: number,
+	onCheck?: (check: HealthCheck) => void,
+): Promise<{ complete: boolean; checks: HealthCheck[] }> {
 	const done = new Map<HealthCheckId, HealthCheck>();
+	let open = true;
+	const record = (id: HealthCheckId, check: HealthCheck) => {
+		if (!open) return;
+		done.set(id, check);
+		onCheck?.(check);
+	};
 	const all = Promise.all(
 		jobs.map((job) =>
 			job.run().then(
-				(check) => void done.set(job.id, check),
-				() => void done.set(job.id, errorCheck(job.id)),
+				(check) => record(job.id, check),
+				() => record(job.id, errorCheck(job.id)),
 			),
 		),
 	);
@@ -132,6 +145,7 @@ export async function runJobs(jobs: HealthJob[], timeoutMs: number): Promise<{ c
 		timer = setTimeout(resolve, timeoutMs);
 	});
 	await Promise.race([all, deadline]);
+	open = false;
 	clearTimeout(timer);
 	const checks = jobs.map((j) => done.get(j.id)).filter((c): c is HealthCheck => c !== undefined);
 	return { complete: checks.length === jobs.length, checks };
@@ -139,9 +153,9 @@ export async function runJobs(jobs: HealthJob[], timeoutMs: number): Promise<{ c
 
 export async function runHealthCheck(
 	domain: string,
-	opts: { agent?: AgentEnv; timeoutMs?: number } = {},
+	opts: { agent?: AgentEnv; timeoutMs?: number; checkedAt?: Date; onCheck?: (check: HealthCheck) => void } = {},
 ): Promise<{ complete: boolean; report: HealthReport }> {
-	const checkedAt = new Date();
-	const { complete, checks } = await runJobs(healthJobs(domain, { agent: opts.agent }), opts.timeoutMs ?? HEALTH_CHECK_TIMEOUT_MS);
+	const checkedAt = opts.checkedAt ?? new Date();
+	const { complete, checks } = await runJobs(healthJobs(domain, { agent: opts.agent }), opts.timeoutMs ?? HEALTH_CHECK_TIMEOUT_MS, opts.onCheck);
 	return { complete, report: buildReport(domain, checks, checkedAt) };
 }

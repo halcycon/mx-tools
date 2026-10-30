@@ -113,6 +113,29 @@ Response `200`:
 }
 ```
 
+### Streaming (`Accept: text/event-stream`)
+
+Send the same `POST` and body with `Accept: text/event-stream` to receive results as each check finishes. Read it with `fetch`; `EventSource` can't POST. Validation, rate limiting, and Turnstile run first. Their errors (`400 invalid_domain`, `403 turnstile_failed`, `429 rate_limited` + `Retry-After`) come back as plain JSON, exactly as without the header. Treat the response as a stream only when `content-type` is `text/event-stream`.
+
+```bash
+curl -N -X POST https://dart.thecuckoocamp.co.uk/api/v1/health-check \
+  -H 'Accept: text/event-stream' -H 'Content-Type: application/json' \
+  -H 'Origin: https://www.thecuckoocamp.co.uk' \
+  -d '{"domain":"example.org","turnstileToken":"<token>"}'
+```
+
+Framing is `event: <name>\ndata: <json>\n\n`, the same as `/api/lookup?stream=1`. Headers are `content-type: text/event-stream; charset=utf-8`, `cache-control: no-cache`, plus the usual CORS headers and `vary: Origin`.
+
+| Event | `data` | When |
+|-------|--------|------|
+| `start` | `{ "domain", "checkedAt", "expected": 10, "checks": ["spf","dmarc",…] }` | Immediately |
+| `check` | One check `{ id, status, code, facts, technical }`, the same shape as an item of `checks[]` | As each check finishes, in completion order |
+| `done` | The full report (`domain, checkedAt, score, overall, checks`) plus `"complete": true` | All checks finished |
+| `done` | The partial report with `"complete": false` | The ~15 s deadline passed. This replaces the JSON variant's `502 upstream_timeout`; no `check` events follow it |
+| `error` | `{ "error": "internal_error" }` | Something failed after the stream started |
+
+A streamed request counts once against the rate limit, like a JSON one. Complete results are cached the same way. A cache hit within 10 minutes sends `start`, every `check` back to back, then `done`, with the original `checkedAt`.
+
 `checks[]` is always ordered `spf, dmarc, dkim, mx, mta-sts, tlsrpt, blacklist, bimi, dns, https`. `score` counts `pass`/`warn`/`fail` only. `info` results are neutral. `overall` is `fail` if any check fails, otherwise `warn` if any warns, otherwise `pass`.
 
 | Status | Body |
@@ -134,7 +157,7 @@ Response `200`:
 - Complete results are cached per domain for 10 minutes: Cache API, plus an in-isolate fallback because the Cache API is inactive on `workers.dev`. Partial results are never cached.
 - Logs carry the domain, outcome, and counts only. Client IPs are only used as a hashed rate-limit key.
 
-**CORS.** Allowed origins are `https://www.thecuckoocamp.co.uk` and `https://thecuckoocamp.co.uk`. Set `HEALTH_CHECK_ALLOW_DEV_ORIGINS="true"` (in `.dev.vars` or `wrangler.jsonc` `vars`) to also allow `http://localhost:1313` for Hugo dev. Other API routes keep `*`.
+**CORS.** Allowed origins are `https://www.thecuckoocamp.co.uk`, `https://thecuckoocamp.co.uk`, and Cloudflare Pages previews of the website (`https://<branch-or-hash>.cuckoo-site.pages.dev`, one label only). The same list applies to `/api/v1/report-request`. Set `HEALTH_CHECK_ALLOW_DEV_ORIGINS="true"` (in `.dev.vars` or `wrangler.jsonc` `vars`) to also allow `http://localhost:1313` for Hugo dev. Other API routes keep `*`.
 
 **Rate limit.** The `HEALTH_CHECK_RATE_LIMITER` binding allows 3 checks per 60 s per client IP, per Cloudflare location. The binding only supports 10 s or 60 s windows, so this is the closest to “10 per 10 minutes” while still allowing a short burst. Counts are approximate (see [docs](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/)).
 
