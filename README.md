@@ -287,13 +287,13 @@ Every Worker secret and variable, with its exact value and source, is listed in 
 ```bash
 npx wrangler d1 migrations apply mx-tools-reports --remote   # npm run db:migrate
 npx wrangler secret put TURNSTILE_SECRET
-npx wrangler secret put LEAD_NOTIFY_TO        # Adam's lead inbox
-npx wrangler secret put REPLY_TO              # Reply-To on reports
 npx wrangler secret put AGENT_URL             # e.g. https://dart-agent.thecuckoocamp.co.uk
 npx wrangler secret put AGENT_HMAC_SECRET     # same value as MX_AGENT_HMAC_SECRET on the VPS
 npx wrangler secret put AGENT_CLIENT_ID       # Cloudflare Access service token (optional, recommended)
 npx wrangler secret put AGENT_CLIENT_SECRET
 ```
+
+Set `LEAD_NOTIFY_TO` (your lead inbox) and `REPLY_TO` (Reply-To on reports) as plain-text **variables on the Worker** in the dashboard, not in `wrangler.jsonc`, so the addresses stay out of this public repo. `keep_vars: true` keeps them across deploys.
 
 `REPORT_FROM` must be on an Email Sending domain (`thecuckoocamp.co.uk` is onboarded). The `EMAIL` binding only allows that sender.
 

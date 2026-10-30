@@ -26,8 +26,6 @@ You can also set them in the dashboard: **Workers & Pages → mx-tools → Setti
 | `AGENT_HMAC_SECRET` | Signing every probe request | 64 hex characters (`openssl rand -hex 32`) | You generate it. **Must equal `MX_AGENT_HMAC_SECRET`** in the agent's `.env` | Agent answers `401` → Worker falls back as above |
 | `AGENT_CLIENT_ID` | Getting through Cloudflare Access in front of the agent | Service token Client ID, e.g. `1a2b3c….access` | Zero Trust → **Access → Service credentials → Service Tokens** → Create | Access returns `403` → Worker falls back |
 | `AGENT_CLIENT_SECRET` | Same | Service token Client Secret (64 hex) | Shown **once** when you create the service token | Same as above |
-| `LEAD_NOTIFY_TO` | Lead notifications, failure notices, daily-cap notice | Your inbox, e.g. `adam@thecuckoocamp.co.uk` | You choose | Reports still go to requesters, but you get no leads or alerts |
-| `REPLY_TO` | `Reply-To` on report and confirmation emails | The address requesters should reply to | You choose | Replies go to `REPORT_FROM` (`reports@…`), which may not be monitored |
 
 ### Optional or legacy
 
@@ -47,9 +45,24 @@ You can also set them in the dashboard: **Workers & Pages → mx-tools → Setti
 
 The Access service token (`AGENT_CLIENT_ID` / `AGENT_CLIENT_SECRET`) is **not** needed on the VPS. Cloudflare Access checks it at the edge, before requests reach the tunnel.
 
+## Project variables (set on the Worker, not in the repo)
+
+These two aren't secret, but they are personal addresses, so they're kept out of the public repo. Set them as plain-text variables on the Worker. `wrangler.jsonc` has `"keep_vars": true`, so deploys leave them alone; without it, every deploy would delete them.
+
+| Variable | Value | Used for | If missing |
+|----------|---------------|----------|------------|
+| `LEAD_NOTIFY_TO` | Your own inbox (not a shared list: leads contain requesters' details) | Lead notifications (name, email, organisation, domain, wants a call, top issues), failure notices, daily-cap notice. A lead's Reply-To is the requester | Reports still go to requesters, but you get no leads or alerts |
+| `REPLY_TO` | The address requesters should reply to | `Reply-To` on report, confirmation and apology emails | Replies go to `REPORT_FROM` (`reports@…`), which may not be monitored |
+
+**Set or change them:** Workers & Pages → **mx-tools** → **Settings → Variables and Secrets → Add**, choose **Type: Text** (not Secret), then **Deploy**. Alternatively, run a one-off deploy from an up-to-date `main` with `npx wrangler deploy --var LEAD_NOTIFY_TO:<your inbox> --var REPLY_TO:<reply address>`.
+
+Don't also create secrets with these names (a binding name can only be used once), and don't add them to `vars` in `wrangler.jsonc`.
+
+**Check them:** `npx wrangler versions view <deployed version id>` lists the plain-text variables and their values.
+
 ## Plain variables (in `wrangler.jsonc`, not secret)
 
-These are committed and deployed with the code. Change them in `wrangler.jsonc`; dashboard edits are overwritten on the next deploy.
+These are committed and deployed with the code. Change them in `wrangler.jsonc`; a dashboard edit to any of these is overwritten on the next deploy, because the config value wins.
 
 | Var | Default | Meaning |
 |-----|---------|---------|
@@ -68,7 +81,8 @@ Declared in `wrangler.jsonc` and created already: `DB` (D1 `mx-tools-reports`), 
 
 ```bash
 npx wrangler secret list
-# expect: TURNSTILE_SECRET, AGENT_URL, AGENT_HMAC_SECRET, AGENT_CLIENT_ID, AGENT_CLIENT_SECRET, LEAD_NOTIFY_TO, REPLY_TO
+# expect: TURNSTILE_SECRET, AGENT_URL, AGENT_HMAC_SECRET, AGENT_CLIENT_ID, AGENT_CLIENT_SECRET
+# (LEAD_NOTIFY_TO and REPLY_TO are variables, so they don't appear here)
 npx wrangler tail --format pretty      # then run a check on the website
 ```
 
