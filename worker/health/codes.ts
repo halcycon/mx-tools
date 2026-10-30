@@ -106,13 +106,17 @@ export function errorCheck(id: HealthCheckId): HealthCheck {
 	return toCheck(id, { code: 'check_error', facts: { reason: 'lookup_failed' }, technical: '' });
 }
 
+export function formatCheckedAt(d: Date): string {
+	return d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
 export function buildReport(domain: string, checks: HealthCheck[], checkedAt: Date): HealthReport {
 	const score = { pass: 0, warn: 0, fail: 0 };
 	for (const c of checks) if (c.status !== 'info') score[c.status] += 1;
 	const overall = score.fail ? 'fail' : score.warn ? 'warn' : 'pass';
 	return {
 		domain,
-		checkedAt: checkedAt.toISOString().replace(/\.\d{3}Z$/, 'Z'),
+		checkedAt: formatCheckedAt(checkedAt),
 		score,
 		overall,
 		checks: [...checks].sort((a, b) => CHECK_ORDER.indexOf(a.id) - CHECK_ORDER.indexOf(b.id)),
