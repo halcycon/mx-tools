@@ -4,6 +4,8 @@
 	"main": "worker/index.ts",
 	"compatibility_date": "2026-08-20",
 	"compatibility_flags": ["nodejs_compat"],
+	// Keep variables set on the Worker in the dashboard (LEAD_NOTIFY_TO, REPLY_TO) across deploys.
+	"keep_vars": true,
 	"assets": {
 		"directory": "./dist",
 		"not_found_handling": "single-page-application",
@@ -14,8 +16,9 @@
 		// "true" also allows http://localhost:1313 (Hugo dev) to call /api/v1/*
 		"HEALTH_CHECK_ALLOW_DEV_ORIGINS": "false",
 
-		// Full report (gated). Secrets: TURNSTILE_SECRET, LEAD_NOTIFY_TO, REPLY_TO,
-		// AGENT_URL, AGENT_HMAC_SECRET, AGENT_CLIENT_ID, AGENT_CLIENT_SECRET (see README).
+		// Full report (gated). Secrets: TURNSTILE_SECRET, AGENT_URL, AGENT_HMAC_SECRET,
+		// AGENT_CLIENT_ID, AGENT_CLIENT_SECRET. LEAD_NOTIFY_TO and REPLY_TO are plain variables
+		// set on the Worker in the dashboard, kept out of this public repo (see docs/worker-secrets.md).
 		"REPORT_FROM": "reports@thecuckoocamp.co.uk",
 		"REPORT_FROM_NAME": "The Cuckoo Camp",
 		"SITE_URL": "https://www.thecuckoocamp.co.uk",
