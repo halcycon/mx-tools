@@ -155,7 +155,63 @@ A streamed request counts once against the rate limit, like a JSON one. Complete
 
 **Caching and logs.**
 - Complete results are cached per domain for 10 minutes: Cache API, plus an in-isolate fallback because the Cache API is inactive on `workers.dev`. Partial results are never cached.
-- Logs carry the domain, outcome, and counts only. Client IPs are only used as a hashed rate-limit key.
+- Logs carry the domain, outcome, and counts only. Rate-limit keys are hashed. Accepted website API checks also record usage in D1 for the daily summary below.
+
+### Daily website usage summary
+
+Only accepted `POST /api/v1/health-check` requests are recorded, after domain validation,
+rate limiting and Turnstile. JSON, streamed and cached responses each count as one
+check. Main DART UI routes (`/api/lookup`, `/api/supertool`, `/api/headers`), CLI/VPS
+probes, full-report requests, preflights and rejected requests are excluded.
+
+The existing 15-minute cron sends the previous **Europe/London calendar day** to
+`LEAD_NOTIFY_TO`, using the existing `EMAIL` binding and `REPORT_FROM`. Its first tick
+after UK midnight sends the summary; UK daylight saving is handled automatically
+(23/25-hour days at clock changes). The first tick after initial deployment also
+sends the previous day's summary. Empty days produce a zero-usage email.
+
+Each check includes the normalised domain, request time in UK time, visitor IP from
+`CF-Connecting-IP`, page path, referrer path, five UTM values (`utm_source`,
+`utm_medium`, `utm_campaign`, `utm_term`, `utm_content`), outcome and cache status.
+The website supplies optional attribution in the JSON request:
+
+```json
+{
+  "domain": "example.org",
+  "turnstileToken": "...",
+  "attribution": {
+    "pageUrl": "https://www.thecuckoocamp.co.uk/health-check/",
+    "referrer": "https://search.example/",
+    "utm": { "utm_source": "newsletter", "utm_campaign": "autumn" }
+  }
+}
+```
+
+The website preserves attribution between pages in the same tab using session
+storage. If unavailable, it still submits current-page attribution. Attribution is
+browser-supplied, may be absent, and is not proof of identity or campaign origin.
+For older clients, the request's `Referer` is used when no explicit referrer was
+supplied. Other URL query parameters, credentials and fragments are discarded;
+URLs and UTM lengths are bounded. IP/attribution are not written to application logs.
+
+D1 usage data expires after **seven days**, including when no recipient is configured.
+Emails are separate copies in the recipient's inbox. Storage failure never blocks
+a check and is reported as `health_usage_storage_failed`, without visitor details.
+An interrupted check can remain `started`.
+
+Large summaries are split into pages of 100 checks, with per-page domain totals.
+Up to ten pages are sent per cron invocation; subsequent ticks resume larger runs.
+Failed deliveries retry on subsequent ticks, including after the next midnight,
+within retention. Completed pages are recorded and an atomic lease prevents
+overlapping cron senders. As with any external email send followed by a database
+write, a crash between the two can cause that page to be resent.
+
+**Rollout:** apply migration `0002_health_usage.sql` before deploying the Worker
+(`npm run db:migrate`, then `npm run deploy`). Publish the matching `cuckoo-site`
+attribution/privacy changes to capture original referrers and UTMs. No new secrets,
+bindings or VPS agent changes are required. With no `LEAD_NOTIFY_TO`, collection
+and cleanup continue but email delivery is skipped. No historic IP or attribution
+can be recovered from earlier checks.
 
 **CORS.** Allowed origins are `https://www.thecuckoocamp.co.uk`, `https://thecuckoocamp.co.uk`, and Cloudflare Pages previews of the website (`https://<branch-or-hash>.cuckoo-site.pages.dev`, one label only). The same list applies to `/api/v1/report-request`. Set `HEALTH_CHECK_ALLOW_DEV_ORIGINS="true"` (in `.dev.vars` or `wrangler.jsonc` `vars`) to also allow `http://localhost:1313` for Hugo dev. Other API routes keep `*`.
 

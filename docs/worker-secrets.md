@@ -51,7 +51,7 @@ These two aren't secret, but they are personal addresses, so they're kept out of
 
 | Variable | Value | Used for | If missing |
 |----------|---------------|----------|------------|
-| `LEAD_NOTIFY_TO` | Your own inbox (not a shared list: leads contain requesters' details) | Lead notifications (name, email, organisation, domain, wants a call, top issues), failure notices, daily-cap notice. A lead's Reply-To is the requester | Reports still go to requesters, but you get no leads or alerts |
+| `LEAD_NOTIFY_TO` | Your own inbox (not a shared list: leads contain requesters' details) | Lead notifications (name, email, organisation, domain, wants a call, top issues), failure notices, daily-cap notice, and the daily website health-check usage summary (UK midnight, including visitor IP and attribution). A lead's Reply-To is the requester | Reports still go to requesters, but you get no leads or alerts |
 | `REPLY_TO` | The address requesters should reply to | `Reply-To` on report, confirmation and apology emails | Replies go to `REPORT_FROM` (`reports@…`), which may not be monitored |
 
 **Set or change them:** Workers & Pages → **mx-tools** → **Settings → Variables and Secrets → Add**, choose **Type: Text** (not Secret), then **Deploy**. Alternatively, run a one-off deploy from an up-to-date `main` with `npx wrangler deploy --var LEAD_NOTIFY_TO:<your inbox> --var REPLY_TO:<reply address>`.
