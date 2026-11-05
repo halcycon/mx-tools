@@ -2,10 +2,11 @@ import { normalizeDomain } from './domain';
 import { runHealthCheck } from './run';
 import { formatCheckedAt, HEALTH_CHECK_IDS, type HealthCheck, type HealthReport } from './codes';
 import type { AgentEnv } from '../agent/client';
+import { beginUsage, finishUsage, type UsageEnv } from '../usage/store';
 
 export const HEALTH_CHECK_PATH = '/api/v1/health-check';
 
-export type HealthEnv = AgentEnv & {
+export type HealthEnv = AgentEnv & UsageEnv & {
 	TURNSTILE_SECRET?: string;
 	HEALTH_CHECK_ALLOW_DEV_ORIGINS?: string;
 	HEALTH_CHECK_RATE_LIMITER?: RateLimit;
@@ -123,7 +124,7 @@ export async function handleHealthCheck(request: Request, env: HealthEnv, ctx: E
 		return reply({ error: 'method_not_allowed' }, 405, origin, { allow: 'POST, OPTIONS' });
 	}
 
-	let body: { domain?: unknown; turnstileToken?: unknown };
+	let body: { domain?: unknown; turnstileToken?: unknown; attribution?: unknown };
 	try {
 		const text = await request.text();
 		if (text.length > MAX_BODY_BYTES) throw new Error('too large');
@@ -155,36 +156,44 @@ export async function handleHealthCheck(request: Request, env: HealthEnv, ctx: E
 	}
 
 	const started = Date.now();
+	const usageId = await beginUsage(env, request, domain, body.attribution);
 	if (request.headers.get('accept')?.includes('text/event-stream')) {
-		return streamHealthCheck(domain, env, ctx, origin, started);
+		return streamHealthCheck(domain, env, ctx, origin, started, usageId);
 	}
-	const cached = await cachedReport(domain);
-	if (cached) {
-		logOutcome({ outcome: 'ok', domain, overall: cached.overall, ...cached.score, cached: true, ms: Date.now() - started });
-		return reply(cached, 200, origin);
+	try {
+		const cached = await cachedReport(domain);
+		if (cached) {
+			logOutcome({ outcome: 'ok', domain, overall: cached.overall, ...cached.score, cached: true, ms: Date.now() - started });
+			ctx.waitUntil(finishUsage(env, usageId, 'ok', true));
+			return reply(cached, 200, origin);
+		}
+
+		const { complete, report } = await runHealthCheck(domain, { agent: env });
+		logOutcome({
+			outcome: complete ? 'ok' : 'upstream_timeout',
+			domain,
+			overall: report.overall,
+			...report.score,
+			checks: report.checks.length,
+			cached: false,
+			ms: Date.now() - started,
+		});
+		ctx.waitUntil(finishUsage(env, usageId, complete ? 'ok' : 'upstream_timeout'));
+		if (!complete) return reply({ error: 'upstream_timeout', partial: report }, 502, origin);
+
+		ctx.waitUntil(storeReport(domain, report));
+		return reply(report, 200, origin);
+	} catch (error) {
+		ctx.waitUntil(finishUsage(env, usageId, 'internal_error'));
+		throw error;
 	}
-
-	const { complete, report } = await runHealthCheck(domain, { agent: env });
-	logOutcome({
-		outcome: complete ? 'ok' : 'upstream_timeout',
-		domain,
-		overall: report.overall,
-		...report.score,
-		checks: report.checks.length,
-		cached: false,
-		ms: Date.now() - started,
-	});
-	if (!complete) return reply({ error: 'upstream_timeout', partial: report }, 502, origin);
-
-	ctx.waitUntil(storeReport(domain, report));
-	return reply(report, 200, origin);
 }
 
 /**
  * SSE variant (opt-in with `Accept: text/event-stream`): `start`, one `check` per finished check,
  * then `done` with the report plus `complete`. Called only after validation, rate limit and Turnstile.
  */
-function streamHealthCheck(domain: string, env: HealthEnv, ctx: ExecutionContext, origin: string | null, started: number): Response {
+function streamHealthCheck(domain: string, env: HealthEnv, ctx: ExecutionContext, origin: string | null, started: number, usageId: string | null): Response {
 	const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
 	const writer = writable.getWriter();
 	const enc = new TextEncoder();
@@ -198,6 +207,7 @@ function streamHealthCheck(domain: string, env: HealthEnv, ctx: ExecutionContext
 		try {
 			const cached = await cachedReport(domain);
 			if (cached) {
+				await finishUsage(env, usageId, 'ok', true);
 				await start(cached.checkedAt);
 				for (const check of cached.checks) await send('check', check);
 				await send('done', { ...cached, complete: true });
@@ -211,6 +221,7 @@ function streamHealthCheck(domain: string, env: HealthEnv, ctx: ExecutionContext
 				checkedAt,
 				onCheck: (check: HealthCheck) => void send('check', check),
 			});
+			await finishUsage(env, usageId, complete ? 'ok' : 'upstream_timeout');
 			await send('done', { ...report, complete });
 			logOutcome({
 				outcome: complete ? 'ok' : 'upstream_timeout',
@@ -224,6 +235,7 @@ function streamHealthCheck(domain: string, env: HealthEnv, ctx: ExecutionContext
 			});
 			if (complete) await storeReport(domain, report);
 		} catch {
+			await finishUsage(env, usageId, 'internal_error');
 			await send('error', { error: 'internal_error' });
 		} finally {
 			closed = true;

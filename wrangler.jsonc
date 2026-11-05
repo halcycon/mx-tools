@@ -50,6 +50,7 @@
 		"consumers": [{ "queue": "mx-tools-reports", "max_batch_size": 1, "max_retries": 3 }]
 	},
 	"send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["reports@thecuckoocamp.co.uk"] }],
+	// Report housekeeping plus website usage summary (first tick after UK midnight; retries every 15 min).
 	"triggers": { "crons": ["*/15 * * * *"] },
 	"ratelimits": [
 		{

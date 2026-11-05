@@ -4,6 +4,7 @@ import { plannedChecks, runOne, streamOne } from './checks/run';
 import { handleHealthCheck, HEALTH_CHECK_PATH, type HealthEnv } from './health/handler';
 import { handleReportConfirm, handleReportRequest, REPORT_CONFIRM_PATH, REPORT_REQUEST_PATH, type FullReportEnv } from './report/handler';
 import { handleReportCron, handleReportQueue } from './report/queue';
+import { handleUsageCron } from './usage/digest';
 import type { ReportJob } from './report/config';
 
 type WorkerEnv = Env & HealthEnv & FullReportEnv & { SPAMHAUS_DQS_KEY?: string };
@@ -174,7 +175,13 @@ export default {
 		await handleReportQueue(batch as MessageBatch<ReportJob>, env as WorkerEnv);
 	},
 
-	async scheduled(_controller, env): Promise<void> {
-		await handleReportCron(env as WorkerEnv);
+	async scheduled(controller, env): Promise<void> {
+		const results = await Promise.allSettled([
+			handleReportCron(env as WorkerEnv),
+			handleUsageCron(env as WorkerEnv, controller.scheduledTime),
+		]);
+		for (const result of results) {
+			if (result.status === 'rejected') throw result.reason;
+		}
 	},
 } satisfies ExportedHandler<Env>;
